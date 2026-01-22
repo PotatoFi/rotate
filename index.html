@@ -140,7 +140,8 @@
                 background-color: var(--foreground);
             }
 
-            .type-option input[type="radio"] {
+            .type-option input[type="radio"],
+            .type-option input[type="checkbox"] {
                 width: auto;
                 margin: 0;
             }
@@ -362,6 +363,14 @@
             >
                 <i class="bx bx-circle"></i>
             </button>
+            <button
+                class="tool-button"
+                id="generateGridTool"
+                onclick="toggleTool('generateGrid')"
+                title="Generate Grid"
+            >
+                <i class="bx bx-grid-alt"></i>
+            </button>
         </div>
 
         <!-- Right panel - Rotate tool options -->
@@ -431,15 +440,15 @@
                         value="attenuatingZone"
                         checked
                     />
-                    Attenuating object
+                    Attenuating Object
                 </label>
                 <label class="type-option">
                     <input type="radio" name="targetType" value="holeInclude" />
-                    Floor hole
+                    Floor Hole
                 </label>
                 <label class="type-option">
                     <input type="radio" name="targetType" value="holeExclude" />
-                    Building edge
+                    Building Edge
                 </label>
                 <label class="type-option">
                     <input
@@ -447,7 +456,7 @@
                         name="targetType"
                         value="scopeInclude"
                     />
-                    Scope zone
+                    Scope Zone
                 </label>
                 <label class="type-option">
                     <input
@@ -455,7 +464,7 @@
                         name="targetType"
                         value="capacityZone"
                     />
-                    Capacity zone
+                    Capacity Zone
                 </label>
             </div>
             <button class="toolbar-button blue" onclick="convertObjectType()">
@@ -483,7 +492,7 @@
                         name="circleType"
                         value="attenuatingZone"
                     />
-                    Attenuating object
+                    Attenuating Object
                 </label>
             </div>
             <div>
@@ -510,6 +519,67 @@
             </div>
             <button class="toolbar-button blue" onclick="generateCircle()">
                 Generate Circle
+            </button>
+        </div>
+
+        <!-- Right panel - Generate Grid tool options -->
+        <div id="generateGridToolbar" class="toolbar">
+            <h3>GENERATE GRID</h3>
+            <p class="toolbar-description">Create a grid of APs or notes:</p>
+            <div class="type-options">
+                <label class="type-option">
+                    <input
+                        type="radio"
+                        name="gridType"
+                        value="accessPoint"
+                        checked
+                    />
+                    Access Points
+                </label>
+                <label class="type-option">
+                    <input type="radio" name="gridType" value="mapNote" />
+                    Map Notes
+                </label>
+                <label class="type-option">
+                    <input type="checkbox" id="gridTriangles" />
+                    Triangular Pattern
+                </label>
+            </div>
+            <div>
+                <h3>ROWS</h3>
+                <input
+                    type="number"
+                    id="gridRows"
+                    value="3"
+                    min="1"
+                    max="100"
+                    placeholder="Number of rows"
+                />
+            </div>
+            <div>
+                <h3>COLUMNS</h3>
+                <input
+                    type="number"
+                    id="gridColumns"
+                    value="3"
+                    min="1"
+                    max="100"
+                    placeholder="Number of columns"
+                />
+            </div>
+            <div>
+                <h3>DISTANCE (METERS)</h3>
+                <input
+                    type="number"
+                    id="gridDistance"
+                    value="10"
+                    min="0.1"
+                    step="0.1"
+                    placeholder="Distance between points"
+                />
+            </div>
+            <button class="toolbar-button blue" onclick="generateGrid()">
+                Generate Grid
             </button>
         </div>
 
@@ -1417,6 +1487,20 @@
                         drawZone(zone.area.coordinates[0], zoneColor);
                     }
                 }
+
+                // Draw access points
+                if (objects && objects.accessPoints) {
+                    for (let ap of objects.accessPoints) {
+                        drawAccessPoint(ap.x - centerX, ap.y - centerY);
+                    }
+                }
+
+                // Draw map notes
+                if (objects && objects.mapNotes) {
+                    for (let note of objects.mapNotes) {
+                        drawAccessPoint(note.x - centerX, note.y - centerY);
+                    }
+                }
             }
 
             function drawZone(coordinates, zoneColor) {
@@ -1433,6 +1517,27 @@
 
                 // Draw dashed outline
                 drawDashedOutline(coordinates, zoneColor);
+            }
+
+            function drawAccessPoint(x, y) {
+                const buttonBlue = "#4285f4";
+                const outerRadius = 20 / zoomLevel;
+                const middleRadius = 18 / zoomLevel;
+                const innerRadius = 14 / zoomLevel;
+
+                noStroke();
+
+                // Outer white circle
+                fill(255);
+                ellipse(x, y, outerRadius * 2, outerRadius * 2);
+
+                // Middle blue circle (inset 4px from outer)
+                fill(buttonBlue);
+                ellipse(x, y, middleRadius * 2, middleRadius * 2);
+
+                // Inner white circle (inset 12px from outer, so 4px radius from center)
+                fill(255);
+                ellipse(x, y, innerRadius * 2, innerRadius * 2);
             }
 
             function drawWalls() {
@@ -1568,6 +1673,20 @@
                         }
                     }
 
+                    // Flip Y for access points
+                    if (objects.accessPoints) {
+                        for (let ap of objects.accessPoints) {
+                            ap.y = canvasHeight - ap.y;
+                        }
+                    }
+
+                    // Flip Y for map notes
+                    if (objects.mapNotes) {
+                        for (let note of objects.mapNotes) {
+                            note.y = canvasHeight - note.y;
+                        }
+                    }
+
                     calculateCenter();
                     rotation = 0;
                 } catch (error) {
@@ -1624,6 +1743,26 @@
                     }
                 }
 
+                // Calculate bounds from access points
+                if (objects.accessPoints) {
+                    for (let ap of objects.accessPoints) {
+                        minX = Math.min(minX, ap.x);
+                        minY = Math.min(minY, ap.y);
+                        maxX = Math.max(maxX, ap.x);
+                        maxY = Math.max(maxY, ap.y);
+                    }
+                }
+
+                // Calculate bounds from map notes
+                if (objects.mapNotes) {
+                    for (let note of objects.mapNotes) {
+                        minX = Math.min(minX, note.x);
+                        minY = Math.min(minY, note.y);
+                        maxX = Math.max(maxX, note.x);
+                        maxY = Math.max(maxY, note.y);
+                    }
+                }
+
                 // If no objects found, use defaults
                 if (minX === Infinity) {
                     minX = maxX = centerX = 0;
@@ -1637,7 +1776,7 @@
                 const objectWidth = maxX - minX;
                 const objectHeight = maxY - minY;
                 zoomLevel =
-                    Math.min(width / objectWidth, height / objectHeight) * 0.5;
+                    Math.min(width / objectWidth, height / objectHeight) * 0.7;
             }
 
             function copyOutput() {
@@ -1712,6 +1851,36 @@
 
                         // Flip Y for Hamina export
                         endpoint.y = canvasHeight - endpoint.y;
+                    }
+                }
+
+                // Rotate access points
+                if (rotatedObjects.accessPoints) {
+                    for (let ap of rotatedObjects.accessPoints) {
+                        const x = ap.x - centerX;
+                        const y = ap.y - centerY;
+                        const rotatedX = x * cos(rotation) - y * sin(rotation);
+                        const rotatedY = x * sin(rotation) + y * cos(rotation);
+                        ap.x = rotatedX + centerX;
+                        ap.y = rotatedY + centerY;
+
+                        // Flip Y for Hamina export
+                        ap.y = canvasHeight - ap.y;
+                    }
+                }
+
+                // Rotate map notes
+                if (rotatedObjects.mapNotes) {
+                    for (let note of rotatedObjects.mapNotes) {
+                        const x = note.x - centerX;
+                        const y = note.y - centerY;
+                        const rotatedX = x * cos(rotation) - y * sin(rotation);
+                        const rotatedY = x * sin(rotation) + y * cos(rotation);
+                        note.x = rotatedX + centerX;
+                        note.y = rotatedY + centerY;
+
+                        // Flip Y for Hamina export
+                        note.y = canvasHeight - note.y;
                     }
                 }
 
@@ -2014,6 +2183,218 @@
 
                 markChangesPending();
                 showToast("Circle generated");
+            }
+
+            function generateGrid() {
+                const gridType = document.querySelector(
+                    'input[name="gridType"]:checked',
+                ).value;
+                const rows =
+                    parseInt(document.getElementById("gridRows").value) || 3;
+                const columns =
+                    parseInt(document.getElementById("gridColumns").value) || 3;
+                const distance =
+                    parseFloat(document.getElementById("gridDistance").value) ||
+                    10;
+                const useTriangles =
+                    document.getElementById("gridTriangles").checked;
+
+                // Calculate grid dimensions to center it
+                const totalWidth = (columns - 1) * distance;
+                const totalHeight = (rows - 1) * distance;
+                const startX = -totalWidth / 2;
+                const startY = -totalHeight / 2;
+
+                if (gridType === "accessPoint") {
+                    // Generate access points
+                    const accessPoints = [];
+
+                    for (let row = 0; row < rows; row++) {
+                        // Offset odd rows by half distance for triangle pattern
+                        const rowOffset =
+                            useTriangles && row % 2 === 1 ? distance / 2 : 0;
+                        for (let col = 0; col < columns; col++) {
+                            const x = startX + col * distance + rowOffset;
+                            const y = startY + row * distance;
+                            const apNumber = row * columns + col + 1;
+
+                            accessPoints.push({
+                                x: x,
+                                y: y,
+                                make: "ciscoCatalystEnt",
+                                model: "CW9166",
+                                mount: "CEILING",
+                                installHeight: 2.5,
+                                azimuth: null,
+                                elevation: null,
+                                externalAntennaMake: null,
+                                externalAntennaModel: null,
+                                radios: [
+                                    {
+                                        id: crypto.randomUUID(),
+                                        band: "BAND_2_4",
+                                        channel: 6,
+                                        txPower: 6,
+                                        channelWidth: 20,
+                                        enabled: false,
+                                        channelLocked: false,
+                                        port: null,
+                                        streamCount: 4,
+                                        technology: "WIFI_PROTOCOL_AX",
+                                        azimuth: null,
+                                        elevation: null,
+                                        installHeight: null,
+                                        externalAntennaMake: null,
+                                        externalAntennaModel: null,
+                                        mount: null,
+                                    },
+                                    {
+                                        id: crypto.randomUUID(),
+                                        band: "BAND_5",
+                                        channel: 36,
+                                        txPower: 10,
+                                        channelWidth: 20,
+                                        enabled: true,
+                                        channelLocked: false,
+                                        port: null,
+                                        streamCount: 4,
+                                        technology: "WIFI_PROTOCOL_AX",
+                                        azimuth: null,
+                                        elevation: null,
+                                        installHeight: null,
+                                        externalAntennaMake: null,
+                                        externalAntennaModel: null,
+                                        mount: null,
+                                    },
+                                    {
+                                        id: crypto.randomUUID(),
+                                        band: "BAND_6",
+                                        channel: 1,
+                                        txPower: 12,
+                                        channelWidth: 20,
+                                        enabled: true,
+                                        channelLocked: false,
+                                        port: null,
+                                        streamCount: 4,
+                                        technology: "WIFI_PROTOCOL_AX",
+                                        azimuth: null,
+                                        elevation: null,
+                                        installHeight: null,
+                                        externalAntennaMake: null,
+                                        externalAntennaModel: null,
+                                        mount: null,
+                                    },
+                                ],
+                                primaryTechnology: "WIFI",
+                                cellularRadios: [],
+                                bleRadios: [
+                                    {
+                                        id: crypto.randomUUID(),
+                                        txPowerDbm: 0,
+                                    },
+                                ],
+                                uwbRadios: [],
+                                enoceanRadios: [],
+                                enoceanCapable: false,
+                                zigbeeRadios: [],
+                                color: "#4687f0",
+                                name: "Access Point ${number}",
+                                number: apNumber,
+                                powerConsumption: 30.5,
+                                connectedInfraDeviceId: null,
+                                ethernetConnection: true,
+                                perRadioOriented: false,
+                                bank: 0,
+                                meshUpstreamAuto: null,
+                                meshUpstreamApId: null,
+                                meshRadioIndex: null,
+                                antennaId: "Cisco C9166",
+                            });
+                        }
+                    }
+
+                    const newObjects = {
+                        header: {
+                            type: "HaminaClipboard",
+                            version: [1, 0, 0],
+                            id: crypto.randomUUID(),
+                        },
+                        walls: [],
+                        wallEndpoints: [],
+                        wallTypes: [],
+                        cableTrays: [],
+                        cableTrayEndpoints: [],
+                        attenuatingZones: [],
+                        attenuatingZoneTypes: [],
+                        scopeZones: [],
+                        capacityZones: [],
+                        holeInFloorZones: [],
+                        accessPoints: accessPoints,
+                        mapNotes: [],
+                        tiePoints: [],
+                        cableRisers: [],
+                        clientDevices: [],
+                        networkInfraDevices: [],
+                        raisedFloorZones: [],
+                        slopedFloors: [],
+                    };
+
+                    jsonData = JSON.stringify(newObjects, null, 2);
+                    parseInput(jsonData);
+                } else {
+                    // Generate map notes
+                    const mapNotes = [];
+
+                    for (let row = 0; row < rows; row++) {
+                        // Offset odd rows by half distance for triangle pattern
+                        const rowOffset =
+                            useTriangles && row % 2 === 1 ? distance / 2 : 0;
+                        for (let col = 0; col < columns; col++) {
+                            const x = startX + col * distance + rowOffset;
+                            const y = startY + row * distance;
+
+                            mapNotes.push({
+                                x: x,
+                                y: y,
+                                text: "",
+                                color: "#db6921",
+                                icon: "NOTICE_OUTLINE",
+                            });
+                        }
+                    }
+
+                    const newObjects = {
+                        header: {
+                            type: "HaminaClipboard",
+                            version: [1, 0, 0],
+                            id: crypto.randomUUID(),
+                        },
+                        walls: [],
+                        wallEndpoints: [],
+                        wallTypes: [],
+                        cableTrays: [],
+                        cableTrayEndpoints: [],
+                        attenuatingZones: [],
+                        attenuatingZoneTypes: [],
+                        scopeZones: [],
+                        capacityZones: [],
+                        holeInFloorZones: [],
+                        accessPoints: [],
+                        mapNotes: mapNotes,
+                        tiePoints: [],
+                        cableRisers: [],
+                        clientDevices: [],
+                        networkInfraDevices: [],
+                        raisedFloorZones: [],
+                        slopedFloors: [],
+                    };
+
+                    jsonData = JSON.stringify(newObjects, null, 2);
+                    parseInput(jsonData);
+                }
+
+                markChangesPending();
+                showToast("Grid generated");
             }
         </script>
     </body>
