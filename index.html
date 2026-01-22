@@ -343,7 +343,7 @@
                 class="tool-button"
                 id="rotateTool"
                 onclick="toggleTool('rotate')"
-                title="Rotate"
+                title="Modify Rotation"
             >
                 <i class="bx bx-rotate-left"></i>
             </button>
@@ -351,7 +351,7 @@
                 class="tool-button"
                 id="changeTypeTool"
                 onclick="toggleTool('changeType')"
-                title="Change Object Type"
+                title="Modify Object Type"
             >
                 <i class="bx bx-transfer"></i>
             </button>
@@ -375,7 +375,7 @@
 
         <!-- Right panel - Rotate tool options -->
         <div id="rotateToolbar" class="toolbar">
-            <h3>ROTATION CONTROLS</h3>
+            <h3>Rotate Objects</h3>
             <div class="rotation-grid">
                 <button
                     class="toolbar-button rotation-button blue"
@@ -430,8 +430,8 @@
 
         <!-- Right panel - Change Type tool options -->
         <div id="changeTypeToolbar" class="toolbar">
-            <h3>CHANGE OBJECT TYPE</h3>
-            <p class="toolbar-description">Convert all objects to:</p>
+            <h3>Convert Zones and Objects</h3>
+            <p class="toolbar-description">Convert all zones and objects to:</p>
             <div class="type-options">
                 <label class="type-option">
                     <input
@@ -468,13 +468,13 @@
                 </label>
             </div>
             <button class="toolbar-button blue" onclick="convertObjectType()">
-                Convert Objects
+                Convert Zones and Objects
             </button>
         </div>
 
         <!-- Right panel - Generate Circle tool options -->
         <div id="generateCircleToolbar" class="toolbar">
-            <h3>GENERATE CIRCLE</h3>
+            <h3>Generate Circle</h3>
             <p class="toolbar-description">Create a circular shape:</p>
             <div class="type-options">
                 <label class="type-option">
@@ -496,7 +496,7 @@
                 </label>
             </div>
             <div>
-                <h3>SEGMENTS</h3>
+                <h3>Segments</h3>
                 <input
                     type="number"
                     id="circleSegments"
@@ -507,7 +507,7 @@
                 />
             </div>
             <div>
-                <h3>DIAMETER (METERS)</h3>
+                <h3>Diameter (Meters)</h3>
                 <input
                     type="number"
                     id="circleDiameter"
@@ -524,7 +524,7 @@
 
         <!-- Right panel - Generate Grid tool options -->
         <div id="generateGridToolbar" class="toolbar">
-            <h3>GENERATE GRID</h3>
+            <h3>Generate Grid</h3>
             <p class="toolbar-description">Create a grid of APs or notes:</p>
             <div class="type-options">
                 <label class="type-option">
@@ -546,7 +546,7 @@
                 </label>
             </div>
             <div>
-                <h3>ROWS</h3>
+                <h3>Rows</h3>
                 <input
                     type="number"
                     id="gridRows"
@@ -557,7 +557,7 @@
                 />
             </div>
             <div>
-                <h3>COLUMNS</h3>
+                <h3>Columns</h3>
                 <input
                     type="number"
                     id="gridColumns"
@@ -568,7 +568,7 @@
                 />
             </div>
             <div>
-                <h3>DISTANCE (METERS)</h3>
+                <h3>Distance (Meters)</h3>
                 <input
                     type="number"
                     id="gridDistance"
