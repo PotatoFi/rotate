@@ -3,125 +3,446 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Hamina Object and Wall Rotation Tool</title>
+        <title>Hamina Clipboard Tools</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+        <link
+            href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css"
+            rel="stylesheet"
+        />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
         <style>
+            :root {
+                --background: #f0f0f0;
+                --foreground: #e0e0e0;
+                --text: #333;
+                --header: #666;
+                --panel-bg: #ffffff;
+                --button-bg: #4285f4;
+                --button-hover: #3b78e7;
+                --button-text: #ffffff;
+            }
+
             body {
                 margin: 0;
                 padding: 0;
                 display: flex;
-                font-family: Arial, sans-serif;
-                background-color: #f0f0f0;
+                font-family: "Quicksand", sans-serif;
+                background-color: var(--background);
+                color: var(--text);
             }
+
             #canvas {
                 flex-grow: 1;
             }
-            #toolbar {
-                padding: 20px;
-                background-color: white;
+
+            /* Left toolbar - tool selection */
+            .tool-menu {
+                position: fixed;
+                top: 20px;
+                left: 20px;
                 display: flex;
                 flex-direction: column;
-                gap: 15px;
+                gap: 10px;
+                z-index: 3;
+                padding-left: env(safe-area-inset-left);
+                padding-bottom: env(safe-area-inset-bottom);
             }
+
+            .tool-button {
+                width: 40px;
+                height: 40px;
+                border-radius: 6px;
+                border: none;
+                background-color: var(--panel-bg);
+                cursor: pointer;
+                font-size: 24px;
+                color: var(--text);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0px 4px 4px 4px rgba(0, 0, 0, 0.025);
+                transition: background-color 0.1s;
+                -webkit-appearance: none;
+                touch-action: manipulation;
+                padding: 0;
+            }
+
+            .tool-button:hover {
+                background-color: var(--foreground);
+            }
+
+            .tool-button:active {
+                transform: translateY(3px);
+                box-shadow: 0px 4px 4px 4px rgba(0, 0, 0, 0.025);
+            }
+
+            .tool-button.active {
+                background-color: var(--foreground);
+                border: 2px solid var(--text);
+            }
+
+            /* Right panel - tool options */
+            .toolbar {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px;
+                background-color: var(--panel-bg);
+                border-radius: 6px;
+                border: none;
+                box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+                display: none;
+                flex-direction: column;
+                gap: 15px;
+                z-index: 3;
+                max-width: 400px;
+                max-height: calc(100vh - 60px);
+                overflow-y: auto;
+            }
+
+            .toolbar.visible {
+                display: flex;
+            }
+
+            .toolbar-description {
+                margin: 0;
+                font-size: 14px;
+                color: var(--text);
+            }
+
+            .type-options {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .type-option {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: background-color 0.1s;
+            }
+
+            .type-option:hover {
+                background-color: var(--foreground);
+            }
+
+            .type-option input[type="radio"] {
+                width: auto;
+                margin: 0;
+            }
+
             h3 {
                 margin: 0;
-                font-size: 18px;
-                color: #333;
+                font-size: 14px;
+                color: var(--header);
+                font-weight: 700;
             }
+
             select,
             input,
-            textarea,
-            button {
+            textarea {
                 width: 100%;
                 padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
+                border: 1px solid var(--foreground);
+                border-radius: 6px;
                 font-size: 14px;
+                font-family: inherit;
+                background-color: var(--background);
+                color: var(--text);
             }
+
             textarea {
                 height: 200px;
                 width: 360px;
                 font-size: 10px;
                 resize: vertical;
             }
+
             .input-group {
                 display: flex;
                 gap: 10px;
             }
+
             .input-group > * {
                 flex: 1;
             }
-            button {
-                background-color: #f0f0f0;
+
+            .toolbar-button {
+                width: 100%;
+                padding: 8px;
+                border-radius: 6px;
                 border: none;
+                background-color: var(--panel-bg);
                 cursor: pointer;
-                transition: background-color 0.3s;
+                font-size: 14px;
+                font-family: inherit;
+                color: var(--text);
+                transition: background-color 0.1s;
+                -webkit-appearance: none;
+                touch-action: manipulation;
+                box-shadow: 0px 1px 3px rgba(0, 0, 0, 0.1);
             }
-            button:hover {
-                background-color: #e0e0e0;
+
+            .toolbar-button:hover {
+                background-color: var(--foreground);
             }
-            #copyButton {
-                background-color: #4285f4;
-                color: white;
+
+            .toolbar-button:active {
+                transform: translateY(2px);
             }
-            #copyButton:hover {
-                background-color: #3b78e7;
+
+            .toolbar-button.blue {
+                background-color: var(--button-bg);
+                color: var(--button-text);
             }
+
+            .toolbar-button.blue:hover {
+                background-color: var(--button-hover);
+            }
+
+            .toolbar-button.green {
+                background-color: #4caf50;
+                color: var(--button-text);
+            }
+
+            .toolbar-button.green:hover {
+                background-color: #45a049;
+            }
+
+            @keyframes pulse-blue {
+                0%,
+                100% {
+                    background-color: var(--button-bg);
+                }
+                50% {
+                    background-color: #6aa3f8;
+                }
+            }
+
+            .toolbar-button.pending {
+                animation: pulse-blue 1.5s ease-in-out infinite;
+            }
+
+            .toolbar-button.pending:hover {
+                animation: none;
+                background-color: var(--button-hover);
+            }
+
+            .rotation-button {
+                padding: 8px;
+                min-width: 50px;
+                aspect-ratio: 1;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 2px;
+            }
+
+            /* Toast notifications */
+            .toast-container {
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                z-index: 100;
+                pointer-events: none;
+            }
+
+            .toast {
+                background-color: var(--panel-bg);
+                color: var(--text);
+                padding: 12px 20px;
+                border-radius: 6px;
+                box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.15);
+                font-size: 14px;
+                opacity: 1;
+            }
+
+            .toast.fade-out {
+                animation: toast-out 0.3s ease forwards;
+            }
+
+            @keyframes toast-out {
+                to {
+                    opacity: 0;
+                }
+            }
+
             .arrow {
-                font-size: 18px;
+                font-size: 16px;
             }
-            #clearButton {
-                background-color: #ff4444;
-                color: white;
-                margin-bottom: 10px;
+
+            /* Floating input panel - top center */
+            .input-panel {
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 10px;
+                background-color: var(--panel-bg);
+                border-radius: 6px;
+                border: none;
+                box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+                display: flex;
+                flex-direction: row;
+                gap: 10px;
+                z-index: 3;
             }
-            #clearButton:hover {
-                background-color: #cc0000;
+
+            .input-panel .toolbar-button {
+                padding: 8px 16px;
+                white-space: nowrap;
             }
         </style>
     </head>
     <body>
         <div id="canvas"></div>
-        <div id="toolbar">
-            <h3>Rotation Controls</h3>
+
+        <!-- Toast container -->
+        <div class="toast-container" id="toastContainer"></div>
+
+        <!-- Floating input panel - top center -->
+        <div class="input-panel">
+            <button class="toolbar-button green" onclick="pasteFromClipboard()">
+                <i class="bx bx-paste"></i> Paste from Hamina
+            </button>
+            <button
+                class="toolbar-button blue"
+                id="copyButton"
+                onclick="copyOutput()"
+            >
+                <i class="bx bx-copy"></i> Copy to Clipboard
+            </button>
+        </div>
+
+        <!-- Left tool menu -->
+        <div class="tool-menu">
+            <button
+                class="tool-button"
+                id="rotateTool"
+                onclick="toggleTool('rotate')"
+                title="Rotate"
+            >
+                <i class="bx bx-rotate-left"></i>
+            </button>
+            <button
+                class="tool-button"
+                id="changeTypeTool"
+                onclick="toggleTool('changeType')"
+                title="Change Object Type"
+            >
+                <i class="bx bx-transfer"></i>
+            </button>
+        </div>
+
+        <!-- Right panel - Rotate tool options -->
+        <div id="rotateToolbar" class="toolbar">
+            <h3>ROTATION CONTROLS</h3>
             <div class="input-group">
-                <button onclick="rotateObjects(radians(-1))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(-1))"
+                >
                     1° <span class="arrow">↺</span>
                 </button>
-                <button onclick="rotateObjects(radians(-5))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(-5))"
+                >
                     5° <span class="arrow">↺</span>
                 </button>
-                <button onclick="rotateObjects(radians(-22.5))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(-22.5))"
+                >
                     22.5° <span class="arrow">↺</span>
                 </button>
-                <button onclick="rotateObjects(radians(-45))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(-45))"
+                >
                     45° <span class="arrow">↺</span>
                 </button>
-                <button onclick="rotateObjects(radians(45))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(45))"
+                >
                     45° <span class="arrow">↻</span>
                 </button>
-                <button onclick="rotateObjects(radians(22.5))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(22.5))"
+                >
                     22.5° <span class="arrow">↻</span>
                 </button>
-                <button onclick="rotateObjects(radians(5))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(5))"
+                >
                     5° <span class="arrow">↻</span>
                 </button>
-                <button onclick="rotateObjects(radians(1))">
+                <button
+                    class="toolbar-button rotation-button blue"
+                    onclick="rotateObjects(radians(1))"
+                >
                     1° <span class="arrow">↻</span>
                 </button>
             </div>
-            <h3>Input Objects</h3>
+        </div>
 
-            <textarea
-                id="inputArea"
-                placeholder="In Hamina Network Planner, select objects, copy to the clipboard, and paste here."
-            ></textarea>
-            <button onclick="parseInput()">Render Objects</button>
-            <button id="clearButton" onclick="clearObjects()">
-                Clear Objects
-            </button>
-            <button id="copyButton" onclick="copyOutput()">
-                Copy to clipboard
+        <!-- Right panel - Change Type tool options -->
+        <div id="changeTypeToolbar" class="toolbar">
+            <h3>CHANGE OBJECT TYPE</h3>
+            <p class="toolbar-description">Convert all objects to:</p>
+            <div class="type-options">
+                <label class="type-option">
+                    <input
+                        type="radio"
+                        name="targetType"
+                        value="attenuatingZone"
+                        checked
+                    />
+                    Attenuating object
+                </label>
+                <label class="type-option">
+                    <input type="radio" name="targetType" value="holeInclude" />
+                    Floor hole
+                </label>
+                <label class="type-option">
+                    <input type="radio" name="targetType" value="holeExclude" />
+                    Building edge
+                </label>
+                <label class="type-option">
+                    <input
+                        type="radio"
+                        name="targetType"
+                        value="scopeInclude"
+                    />
+                    Scope zone
+                </label>
+                <label class="type-option">
+                    <input
+                        type="radio"
+                        name="targetType"
+                        value="capacityZone"
+                    />
+                    Capacity zone
+                </label>
+            </div>
+            <button class="toolbar-button blue" onclick="convertObjectType()">
+                Convert Objects
             </button>
         </div>
 
@@ -131,6 +452,76 @@
             let zoomLevel = 1;
             let centerX = 0;
             let centerY = 0;
+            let activeTool = null;
+            let jsonData = null; // Store the raw JSON string
+            let hasPendingChanges = false;
+
+            function markChangesPending() {
+                hasPendingChanges = true;
+                const copyButton = document.getElementById("copyButton");
+                copyButton.classList.add("pending");
+            }
+
+            function clearPendingChanges() {
+                hasPendingChanges = false;
+                const copyButton = document.getElementById("copyButton");
+                copyButton.classList.remove("pending");
+            }
+
+            function showToast(message, duration = 2500) {
+                const container = document.getElementById("toastContainer");
+                const toast = document.createElement("div");
+                toast.className = "toast";
+                toast.textContent = message;
+                container.appendChild(toast);
+
+                setTimeout(() => {
+                    toast.classList.add("fade-out");
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 300);
+                }, duration);
+            }
+
+            async function pasteFromClipboard() {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    jsonData = text;
+                    parseInput(text);
+                    showToast("Pasted from Hamina");
+                } catch (error) {
+                    console.error("Failed to read clipboard:", error);
+                    alert(
+                        "Could not read from clipboard. Please make sure you have copied Hamina objects and allowed clipboard access.",
+                    );
+                }
+            }
+
+            function toggleTool(toolName) {
+                const toolButton = document.getElementById(toolName + "Tool");
+                const toolbar = document.getElementById(toolName + "Toolbar");
+
+                if (activeTool === toolName) {
+                    // Deactivate the tool
+                    activeTool = null;
+                    toolbar.classList.remove("visible");
+                    toolButton.classList.remove("active");
+                } else {
+                    // Deactivate previous tool if any
+                    if (activeTool) {
+                        document
+                            .getElementById(activeTool + "Tool")
+                            .classList.remove("active");
+                        document
+                            .getElementById(activeTool + "Toolbar")
+                            .classList.remove("visible");
+                    }
+                    // Activate new tool
+                    activeTool = toolName;
+                    toolbar.classList.add("visible");
+                    toolButton.classList.add("active");
+                }
+            }
 
             // Default JSON with walls and attenuating zones
             const defaultJSON = `{
@@ -866,7 +1257,6 @@
                   "shortcutKey": "",
                   "topEdge": 1.6,
                   "bottomEdge": null,
-                  "showInList": true,
                   "attenuationDbPerMeter": 10,
                   "ituRModelEnabled": true,
                   "transparencyEnabled": false
@@ -878,7 +1268,6 @@
                   "shortcutKey": "",
                   "topEdge": 1.4,
                   "bottomEdge": null,
-                  "showInList": true,
                   "attenuationDbPerMeter": 30,
                   "ituRModelEnabled": true,
                   "transparencyEnabled": false
@@ -898,12 +1287,12 @@
             }`;
 
             function setup() {
-                const canvas = createCanvas(windowWidth - 420, windowHeight); // The weed number
+                const canvas = createCanvas(windowWidth, windowHeight);
                 canvas.parent("canvas");
 
                 // Load default JSON and render it
-                document.getElementById("inputArea").value = defaultJSON;
-                parseInput();
+                jsonData = defaultJSON;
+                parseInput(defaultJSON);
             }
 
             function draw() {
@@ -924,46 +1313,59 @@
 
                 // Draw attenuating zones
                 if (objects && objects.attenuatingZones) {
-                    // First, draw all filled shapes
                     for (let zone of objects.attenuatingZones) {
-                        const type = objects.attenuatingZoneTypes.find(
+                        const type = objects.attenuatingZoneTypes?.find(
                             (t) => t.id === zone.typeId,
                         );
-                        if (type && type.color) {
-                            let c = color(type.color);
-                            c.setAlpha(128); // 50% transparency (0-255 scale)
-                            fill(c);
-                        } else {
-                            fill(200, 128); // Default gray if no color is specified, with 50% transparency
-                        }
-
-                        // Draw the filled shape
-                        noStroke();
-                        beginShape();
-                        for (let coord of zone.area.coordinates[0]) {
-                            vertex(coord[0] - centerX, coord[1] - centerY);
-                        }
-                        endShape(CLOSE);
-                    }
-
-                    // Then, draw all outlines
-                    for (let zone of objects.attenuatingZones) {
-                        const type = objects.attenuatingZoneTypes.find(
-                            (t) => t.id === zone.typeId,
-                        );
-                        if (type && type.color) {
-                            drawDashedOutline(
-                                zone.area.coordinates[0],
-                                type.color,
-                            );
-                        } else {
-                            drawDashedOutline(
-                                zone.area.coordinates[0],
-                                color(0),
-                            ); // Default to black if no color specified
-                        }
+                        const zoneColor =
+                            type && type.color ? type.color : "#7AC2AF";
+                        drawZone(zone.area.coordinates[0], zoneColor);
                     }
                 }
+
+                // Draw scope zones
+                if (objects && objects.scopeZones) {
+                    for (let zone of objects.scopeZones) {
+                        // Green for include, red for exclude
+                        const zoneColor =
+                            zone.type === "INCLUDE" ? "#4CAF50" : "#F44336";
+                        drawZone(zone.area.coordinates[0], zoneColor);
+                    }
+                }
+
+                // Draw hole in floor zones
+                if (objects && objects.holeInFloorZones) {
+                    for (let zone of objects.holeInFloorZones) {
+                        // Blue for include, orange for exclude
+                        const zoneColor =
+                            zone.type === "INCLUDE" ? "#2196F3" : "#FF9800";
+                        drawZone(zone.area.coordinates[0], zoneColor);
+                    }
+                }
+
+                // Draw capacity zones
+                if (objects && objects.capacityZones) {
+                    for (let zone of objects.capacityZones) {
+                        const zoneColor = "#9C27B0"; // Purple for capacity zones
+                        drawZone(zone.area.coordinates[0], zoneColor);
+                    }
+                }
+            }
+
+            function drawZone(coordinates, zoneColor) {
+                // Draw filled shape
+                let c = color(zoneColor);
+                c.setAlpha(128); // 50% transparency
+                fill(c);
+                noStroke();
+                beginShape();
+                for (let coord of coordinates) {
+                    vertex(coord[0] - centerX, coord[1] - centerY);
+                }
+                endShape(CLOSE);
+
+                // Draw dashed outline
+                drawDashedOutline(coordinates, zoneColor);
             }
 
             function drawWalls() {
@@ -1046,16 +1448,16 @@
             }
 
             function windowResized() {
-                resizeCanvas(windowWidth - 420, windowHeight);
+                resizeCanvas(windowWidth, windowHeight);
             }
 
             function rotateObjects(angle) {
                 rotation += angle;
+                markChangesPending();
             }
 
-            function parseInput() {
+            function parseInput(input) {
                 try {
-                    const input = document.getElementById("inputArea").value;
                     objects = JSON.parse(input);
 
                     // Flip Y-coordinates for Hamina import
@@ -1064,11 +1466,33 @@
                         canvasElem && canvasElem.height
                             ? canvasElem.height
                             : canvas.height;
+
+                    // Helper to flip Y for zone coordinates
+                    function flipZoneY(zone) {
+                        for (let coord of zone.area.coordinates[0]) {
+                            coord[1] = canvasHeight - coord[1];
+                        }
+                    }
+
+                    // Flip all zone types
                     if (objects.attenuatingZones) {
                         for (let zone of objects.attenuatingZones) {
-                            for (let coord of zone.area.coordinates[0]) {
-                                coord[1] = canvasHeight - coord[1];
-                            }
+                            flipZoneY(zone);
+                        }
+                    }
+                    if (objects.scopeZones) {
+                        for (let zone of objects.scopeZones) {
+                            flipZoneY(zone);
+                        }
+                    }
+                    if (objects.holeInFloorZones) {
+                        for (let zone of objects.holeInFloorZones) {
+                            flipZoneY(zone);
+                        }
+                    }
+                    if (objects.capacityZones) {
+                        for (let zone of objects.capacityZones) {
+                            flipZoneY(zone);
                         }
                     }
                     if (objects.wallEndpoints) {
@@ -1091,15 +1515,35 @@
                     maxX = -Infinity,
                     maxY = -Infinity;
 
-                // Calculate bounds from attenuating zones
+                // Helper to update bounds from zone coordinates
+                function updateBoundsFromZone(zone) {
+                    for (let coord of zone.area.coordinates[0]) {
+                        minX = Math.min(minX, coord[0]);
+                        minY = Math.min(minY, coord[1]);
+                        maxX = Math.max(maxX, coord[0]);
+                        maxY = Math.max(maxY, coord[1]);
+                    }
+                }
+
+                // Calculate bounds from all zone types
                 if (objects.attenuatingZones) {
                     for (let zone of objects.attenuatingZones) {
-                        for (let coord of zone.area.coordinates[0]) {
-                            minX = Math.min(minX, coord[0]);
-                            minY = Math.min(minY, coord[1]);
-                            maxX = Math.max(maxX, coord[0]);
-                            maxY = Math.max(maxY, coord[1]);
-                        }
+                        updateBoundsFromZone(zone);
+                    }
+                }
+                if (objects.scopeZones) {
+                    for (let zone of objects.scopeZones) {
+                        updateBoundsFromZone(zone);
+                    }
+                }
+                if (objects.holeInFloorZones) {
+                    for (let zone of objects.holeInFloorZones) {
+                        updateBoundsFromZone(zone);
+                    }
+                }
+                if (objects.capacityZones) {
+                    for (let zone of objects.capacityZones) {
+                        updateBoundsFromZone(zone);
                     }
                 }
 
@@ -1134,17 +1578,11 @@
                 if (rotatedObjects) {
                     const output = JSON.stringify(rotatedObjects, null, 2);
                     navigator.clipboard.writeText(output).then(() => {
-                        const copyButton =
-                            document.getElementById("copyButton");
-                        copyButton.style.backgroundColor = "#4CAF50";
-                        copyButton.textContent = "Copied!";
-                        setTimeout(() => {
-                            copyButton.style.backgroundColor = "#4285f4";
-                            copyButton.textContent = "Copy to clipboard";
-                        }, 1500);
+                        clearPendingChanges();
+                        showToast("Copied to clipboard");
                     });
                 } else {
-                    alert("No objects to copy. Render the objects first.");
+                    alert("No objects to copy. Paste objects first.");
                 }
             }
 
@@ -1158,22 +1596,40 @@
                         ? canvasElem.height
                         : canvas.height;
 
-                // Rotate attenuating zones
+                // Helper to rotate and flip zone coordinates
+                function rotateAndFlipZone(zone) {
+                    for (let coord of zone.area.coordinates[0]) {
+                        const x = coord[0] - centerX;
+                        const y = coord[1] - centerY;
+                        const rotatedX = x * cos(rotation) - y * sin(rotation);
+                        const rotatedY = x * sin(rotation) + y * cos(rotation);
+                        coord[0] = rotatedX + centerX;
+                        coord[1] = rotatedY + centerY;
+
+                        // Flip Y for Hamina export
+                        coord[1] = canvasHeight - coord[1];
+                    }
+                }
+
+                // Rotate all zone types
                 if (rotatedObjects.attenuatingZones) {
                     for (let zone of rotatedObjects.attenuatingZones) {
-                        for (let coord of zone.area.coordinates[0]) {
-                            const x = coord[0] - centerX;
-                            const y = coord[1] - centerY;
-                            const rotatedX =
-                                x * cos(rotation) - y * sin(rotation);
-                            const rotatedY =
-                                x * sin(rotation) + y * cos(rotation);
-                            coord[0] = rotatedX + centerX;
-                            coord[1] = rotatedY + centerY;
-
-                            // Flip Y for Hamina export
-                            coord[1] = canvasHeight - coord[1];
-                        }
+                        rotateAndFlipZone(zone);
+                    }
+                }
+                if (rotatedObjects.scopeZones) {
+                    for (let zone of rotatedObjects.scopeZones) {
+                        rotateAndFlipZone(zone);
+                    }
+                }
+                if (rotatedObjects.holeInFloorZones) {
+                    for (let zone of rotatedObjects.holeInFloorZones) {
+                        rotateAndFlipZone(zone);
+                    }
+                }
+                if (rotatedObjects.capacityZones) {
+                    for (let zone of rotatedObjects.capacityZones) {
+                        rotateAndFlipZone(zone);
                     }
                 }
 
@@ -1197,13 +1653,145 @@
 
             function clearObjects() {
                 objects = null;
-                document.getElementById("inputArea").value = "";
+                jsonData = null;
                 rotation = 0;
                 zoomLevel = 1;
                 centerX = 0;
                 centerY = 0;
                 // Redraw the canvas
                 draw();
+            }
+
+            function convertObjectType() {
+                if (!objects) {
+                    alert(
+                        "No objects loaded. Please paste and render objects first.",
+                    );
+                    return;
+                }
+
+                const targetType = document.querySelector(
+                    'input[name="targetType"]:checked',
+                ).value;
+
+                // Collect all polygon areas from all zone types
+                const allAreas = [];
+
+                if (objects.attenuatingZones) {
+                    for (let zone of objects.attenuatingZones) {
+                        allAreas.push(zone.area);
+                    }
+                }
+                if (objects.scopeZones) {
+                    for (let zone of objects.scopeZones) {
+                        allAreas.push(zone.area);
+                    }
+                }
+                if (objects.holeInFloorZones) {
+                    for (let zone of objects.holeInFloorZones) {
+                        allAreas.push(zone.area);
+                    }
+                }
+                if (objects.capacityZones) {
+                    for (let zone of objects.capacityZones) {
+                        allAreas.push(zone.area);
+                    }
+                }
+
+                if (allAreas.length === 0) {
+                    alert("No zones found to convert.");
+                    return;
+                }
+
+                // Clear all zone arrays
+                objects.attenuatingZones = [];
+                objects.scopeZones = [];
+                objects.holeInFloorZones = [];
+                objects.capacityZones = [];
+
+                // Convert to the target type
+                switch (targetType) {
+                    case "attenuatingZone":
+                        // Create a default attenuating zone type if none exists
+                        if (
+                            !objects.attenuatingZoneTypes ||
+                            objects.attenuatingZoneTypes.length === 0
+                        ) {
+                            objects.attenuatingZoneTypes = [
+                                {
+                                    id: crypto.randomUUID(),
+                                    name: "Converted Zone",
+                                    color: "#7AC2AF",
+                                    shortcutKey: "",
+                                    topEdge: 2,
+                                    bottomEdge: null,
+                                    attenuationDbPerMeter: 5,
+                                    ituRModelEnabled: true,
+                                    transparencyEnabled: false,
+                                },
+                            ];
+                        }
+                        const typeId = objects.attenuatingZoneTypes[0].id;
+                        for (let area of allAreas) {
+                            objects.attenuatingZones.push({
+                                typeId: typeId,
+                                area: area,
+                            });
+                        }
+                        break;
+
+                    case "scopeInclude":
+                        for (let area of allAreas) {
+                            objects.scopeZones.push({
+                                type: "INCLUDE",
+                                area: area,
+                            });
+                        }
+                        break;
+
+                    case "scopeExclude":
+                        for (let area of allAreas) {
+                            objects.scopeZones.push({
+                                type: "EXCLUDE",
+                                area: area,
+                            });
+                        }
+                        break;
+
+                    case "holeInclude":
+                        for (let area of allAreas) {
+                            objects.holeInFloorZones.push({
+                                type: "INCLUDE",
+                                area: area,
+                            });
+                        }
+                        break;
+
+                    case "holeExclude":
+                        for (let area of allAreas) {
+                            objects.holeInFloorZones.push({
+                                type: "EXCLUDE",
+                                area: area,
+                            });
+                        }
+                        break;
+
+                    case "capacityZone":
+                        for (let area of allAreas) {
+                            objects.capacityZones.push({
+                                name: "Capacity Zone",
+                                deviceAmounts: [
+                                    { wifiDevice: "IPHONE", amount: 50 },
+                                    { wifiDevice: "MACBOOK", amount: 50 },
+                                ],
+                                area: area,
+                            });
+                        }
+                        break;
+                }
+
+                markChangesPending();
+                showToast("Objects converted");
             }
         </script>
     </body>
