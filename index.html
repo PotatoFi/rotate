@@ -86,8 +86,37 @@
             }
 
             .tool-button.active {
-                background-color: var(--foreground);
-                border: 2px solid var(--text);
+                background-color: var(--button-bg);
+                color: var(--button-text);
+            }
+
+            .kbd {
+                display: inline-block;
+                padding: 3px 5px;
+                font:
+                    11px/1 "SFMono-Regular",
+                    Consolas,
+                    "Liberation Mono",
+                    Menlo,
+                    Courier,
+                    monospace;
+                color: #444d56;
+                vertical-align: middle;
+                background-color: #fafbfc;
+                border: solid 1px #d1d5da;
+                border-bottom-color: #c6cbd1;
+                border-radius: 3px;
+                box-shadow: inset 0 -1px 0 #c6cbd1;
+            }
+
+            .controls-list {
+                margin: 0;
+                padding-left: 20px;
+                font-size: 14px;
+            }
+
+            .controls-list li {
+                margin-bottom: 8px;
             }
 
             /* Right panel - tool options */
@@ -371,6 +400,14 @@
             >
                 <i class="bx bx-grid-alt"></i>
             </button>
+            <button
+                class="tool-button"
+                id="controlsTool"
+                onclick="toggleTool('controls')"
+                title="Controls"
+            >
+                <i class="bx bx-info-circle"></i>
+            </button>
         </div>
 
         <!-- Right panel - Rotate tool options -->
@@ -583,6 +620,22 @@
             </button>
         </div>
 
+        <!-- Right panel - Controls -->
+        <div id="controlsToolbar" class="toolbar">
+            <h3>Controls</h3>
+            <ul class="controls-list">
+                <li>
+                    <b>Zoom:</b> Hold <span class="kbd">Shift</span>, drag
+                    vertically
+                </li>
+                <li>
+                    <b>Pan:</b> Hold <span class="kbd">Spacebar</span>, move
+                    mouse
+                </li>
+                <li><b>Pan:</b> Use scroll wheel/touchpad</li>
+            </ul>
+        </div>
+
         <script>
             let objects;
             let rotation = 0;
@@ -592,6 +645,86 @@
             let activeTool = null;
             let jsonData = null; // Store the raw JSON string
             let hasPendingChanges = false;
+
+            // Pan/zoom state
+            let panX = 0;
+            let panY = 0;
+            let isPanning = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            let spacebarDown = false;
+            let spacebarStartMouseX = 0;
+            let spacebarStartMouseY = 0;
+            let spacebarStartPanX = 0;
+            let spacebarStartPanY = 0;
+
+            // AP icon images
+            let apIconBase;
+            let apIconMask;
+            const apIconHotspot = { x: 32, y: 80 };
+            const apIconScale = 0.5; // Scale factor for AP icons (adjust as needed)
+
+            // Map note icon images
+            let mapNoteIconBase;
+            let mapNoteIconMask;
+            const mapNoteIconHotspot = { x: 0, y: 64 }; // Bottom left corner of image
+            const mapNoteIconScale = 0.5; // Scale factor for map note icons
+
+            function preload() {
+                apIconBase = loadImage("images/ap-icon-base.png");
+                apIconMask = loadImage("images/ap-icon-mask.png");
+                mapNoteIconBase = loadImage("images/map-note-base.png");
+                mapNoteIconMask = loadImage("images/map-note-mask.png");
+            }
+
+            // ========================================
+            // ZONE STYLING CONFIGURATION
+            // ========================================
+            // Edit these values to adjust the appearance of different zone types.
+            // Colors for attenuating objects are derived from their profile color.
+            //
+            // dashLength: Length of each dash (in canvas units, scaled by zoom)
+            // dashGap: Distance between dashes (in canvas units, scaled by zoom)
+            // strokeWeight: Width of the dash/stroke line
+            // fillOpacity: Opacity of the fill color (0-255, or omit for no fill)
+            // strokeDarken: Factor to darken stroke color (0-1, where 0.77 = 77% brightness)
+
+            const zoneStyles = {
+                attenuatingZone: {
+                    // Color comes from the attenuating zone type profile
+                    dashLength: 2,
+                    dashGap: 2,
+                    strokeWeight: 4,
+                    fillOpacity: 128,
+                    strokeDarken: 0.77,
+                },
+                capacityZone: {
+                    color: "#4E4F54",
+                    dashLength: 2,
+                    dashGap: 2,
+                    strokeWeight: 2,
+                    fillOpacity: 25,
+                },
+                floorHole: {
+                    color: "#85868D",
+                    dashLength: 8,
+                    dashGap: 8,
+                    strokeWeight: 2,
+                },
+                buildingEdge: {
+                    color: "#85868D",
+                    dashLength: 8,
+                    dashGap: 8,
+                    strokeWeight: 2,
+                },
+                scopeZone: {
+                    color: "#85868D",
+                    dashLength: 5,
+                    dashGap: 5,
+                    strokeWeight: 2,
+                },
+            };
+            // ========================================
 
             function markChangesPending() {
                 hasPendingChanges = true;
@@ -1434,7 +1567,7 @@
 
             function draw() {
                 background(240);
-                translate(width / 2, height / 2);
+                translate(width / 2 + panX, height / 2 + panY);
                 rotate(rotation);
                 scale(zoomLevel);
 
@@ -1456,91 +1589,193 @@
                         );
                         const zoneColor =
                             type && type.color ? type.color : "#7AC2AF";
-                        drawZone(zone.area.coordinates[0], zoneColor);
+                        drawZone(
+                            zone.area.coordinates[0],
+                            zoneColor,
+                            zoneStyles.attenuatingZone,
+                        );
                     }
                 }
 
                 // Draw scope zones
                 if (objects && objects.scopeZones) {
                     for (let zone of objects.scopeZones) {
-                        // Green for include, red for exclude
-                        const zoneColor =
-                            zone.type === "INCLUDE" ? "#4CAF50" : "#F44336";
-                        drawZone(zone.area.coordinates[0], zoneColor);
+                        drawZone(
+                            zone.area.coordinates[0],
+                            zoneStyles.scopeZone.color,
+                            zoneStyles.scopeZone,
+                        );
                     }
                 }
 
-                // Draw hole in floor zones
+                // Draw hole in floor zones (INCLUDE = floor hole, EXCLUDE = building edge)
                 if (objects && objects.holeInFloorZones) {
                     for (let zone of objects.holeInFloorZones) {
-                        // Blue for include, orange for exclude
-                        const zoneColor =
-                            zone.type === "INCLUDE" ? "#2196F3" : "#FF9800";
-                        drawZone(zone.area.coordinates[0], zoneColor);
+                        if (zone.type === "INCLUDE") {
+                            // Floor hole - shadow inside
+                            drawZone(
+                                zone.area.coordinates[0],
+                                zoneStyles.floorHole.color,
+                                zoneStyles.floorHole,
+                            );
+                        } else {
+                            // Building edge - shadow outside
+                            drawZone(
+                                zone.area.coordinates[0],
+                                zoneStyles.buildingEdge.color,
+                                zoneStyles.buildingEdge,
+                            );
+                        }
                     }
                 }
 
                 // Draw capacity zones
                 if (objects && objects.capacityZones) {
                     for (let zone of objects.capacityZones) {
-                        const zoneColor = "#9C27B0"; // Purple for capacity zones
-                        drawZone(zone.area.coordinates[0], zoneColor);
+                        drawZone(
+                            zone.area.coordinates[0],
+                            zoneStyles.capacityZone.color,
+                            zoneStyles.capacityZone,
+                        );
                     }
                 }
 
                 // Draw access points
                 if (objects && objects.accessPoints) {
                     for (let ap of objects.accessPoints) {
-                        drawAccessPoint(ap.x - centerX, ap.y - centerY);
+                        const apColor = ap.color || "#4687f0";
+                        drawAccessPoint(
+                            ap.x - centerX,
+                            ap.y - centerY,
+                            apColor,
+                        );
                     }
                 }
 
                 // Draw map notes
                 if (objects && objects.mapNotes) {
                     for (let note of objects.mapNotes) {
-                        drawAccessPoint(note.x - centerX, note.y - centerY);
+                        const noteColor = note.color || "#db6921";
+                        drawMapNote(
+                            note.x - centerX,
+                            note.y - centerY,
+                            noteColor,
+                        );
                     }
                 }
             }
 
-            function drawZone(coordinates, zoneColor) {
-                // Draw filled shape
-                let c = color(zoneColor);
-                c.setAlpha(128); // 50% transparency
-                fill(c);
-                noStroke();
-                beginShape();
-                for (let coord of coordinates) {
-                    vertex(coord[0] - centerX, coord[1] - centerY);
-                }
-                endShape(CLOSE);
-
-                // Draw dashed outline
-                drawDashedOutline(coordinates, zoneColor);
+            function darkenColor(hexColor, factor) {
+                // Convert hex to RGB, multiply by factor, convert back
+                let c = color(hexColor);
+                let r = Math.round(red(c) * factor);
+                let g = Math.round(green(c) * factor);
+                let b = Math.round(blue(c) * factor);
+                return color(r, g, b);
             }
 
-            function drawAccessPoint(x, y) {
-                const buttonBlue = "#4285f4";
-                const outerRadius = 20 / zoomLevel;
-                const middleRadius = 18 / zoomLevel;
-                const innerRadius = 14 / zoomLevel;
+            function drawZone(coordinates, zoneColor, style) {
+                // Transform coordinates to canvas space
+                const canvasCoords = coordinates.map((coord) => [
+                    coord[0] - centerX,
+                    coord[1] - centerY,
+                ]);
 
-                noStroke();
+                // Draw filled shape (only if fillOpacity is defined)
+                if (style.fillOpacity !== undefined) {
+                    let c = color(zoneColor);
+                    c.setAlpha(style.fillOpacity);
+                    fill(c);
+                    noStroke();
+                    beginShape();
+                    for (let coord of canvasCoords) {
+                        vertex(coord[0], coord[1]);
+                    }
+                    endShape(CLOSE);
+                }
 
-                // Outer white circle
-                fill(255);
-                ellipse(x, y, outerRadius * 2, outerRadius * 2);
+                // Calculate stroke color (darken if specified)
+                let strokeColor = zoneColor;
+                if (style.strokeDarken) {
+                    strokeColor = darkenColor(zoneColor, style.strokeDarken);
+                }
 
-                // Middle blue circle (inset 4px from outer)
-                fill(buttonBlue);
-                ellipse(x, y, middleRadius * 2, middleRadius * 2);
+                // Draw dashed outline
+                drawDashedOutline(canvasCoords, strokeColor, style);
+            }
 
-                // Inner white circle (inset 12px from outer, so 4px radius from center)
-                fill(255);
-                ellipse(x, y, innerRadius * 2, innerRadius * 2);
+            function drawAccessPoint(x, y, apColor) {
+                // Save current transformation state
+                push();
+
+                // Move to AP position
+                translate(x, y);
+
+                // Counter-rotate to keep icon upright
+                rotate(-rotation);
+
+                // Calculate icon size (scale by apIconScale, and compensate for zoom)
+                const iconScale = apIconScale / zoomLevel;
+                const drawWidth = apIconBase.width * iconScale;
+                const drawHeight = apIconBase.height * iconScale;
+
+                // Offset by hotspot so icon is anchored at bottom center
+                const drawX = -apIconHotspot.x * iconScale;
+                const drawY = -apIconHotspot.y * iconScale;
+
+                // Draw base icon (white with grey outline)
+                noTint();
+                image(apIconBase, drawX, drawY, drawWidth, drawHeight);
+
+                // Draw color mask with tint
+                tint(apColor);
+                image(apIconMask, drawX, drawY, drawWidth, drawHeight);
+                noTint();
+
+                // Restore transformation state
+                pop();
+            }
+
+            function drawMapNote(x, y, noteColor) {
+                // Save current transformation state
+                push();
+
+                // Move to map note position
+                translate(x, y);
+
+                // Counter-rotate to keep icon upright
+                rotate(-rotation);
+
+                // Calculate icon size (scale by mapNoteIconScale, and compensate for zoom)
+                const iconScale = mapNoteIconScale / zoomLevel;
+                const drawWidth = mapNoteIconBase.width * iconScale;
+                const drawHeight = mapNoteIconBase.height * iconScale;
+
+                // Offset by hotspot so icon is anchored at bottom left
+                const drawX = -mapNoteIconHotspot.x * iconScale;
+                const drawY = -mapNoteIconHotspot.y * iconScale;
+
+                // Draw base icon (white with grey outline)
+                noTint();
+                image(mapNoteIconBase, drawX, drawY, drawWidth, drawHeight);
+
+                // Draw color mask with tint
+                tint(noteColor);
+                image(mapNoteIconMask, drawX, drawY, drawWidth, drawHeight);
+                noTint();
+
+                // Restore transformation state
+                pop();
             }
 
             function drawWalls() {
+                const wallWidth = 4;
+                const borderWidth = 1;
+                const totalWidth = wallWidth + borderWidth * 2;
+                const borderColor = "#333333";
+
+                // Collect wall data for rendering
+                const wallData = [];
                 for (let wall of objects.walls) {
                     const wallType = objects.wallTypes.find(
                         (t) => t.id === wall.materialId,
@@ -1553,47 +1788,49 @@
                     );
 
                     if (wallType && startEndpoint && endEndpoint) {
-                        // Wall line color
-                        if (wallType.color) {
-                            stroke(wallType.color);
-                        } else {
-                            stroke(0); // Default to black
-                        }
-
-                        // Wall line width
-                        strokeWeight(2 / zoomLevel);
-
-                        // Draw wall lines
-                        line(
-                            startEndpoint.x - centerX,
-                            startEndpoint.y - centerY,
-                            endEndpoint.x - centerX,
-                            endEndpoint.y - centerY,
-                        );
+                        wallData.push({
+                            x1: startEndpoint.x - centerX,
+                            y1: startEndpoint.y - centerY,
+                            x2: endEndpoint.x - centerX,
+                            y2: endEndpoint.y - centerY,
+                            color: wallType.color || "#000000",
+                        });
                     }
                 }
-            }
 
-            function drawDashedOutline(coordinates, color) {
-                stroke(color); // Black color for the outline
-                strokeWeight(2 / zoomLevel); // Adjust stroke weight based on zoom level
-                noFill();
+                // First pass: draw borders (thick lines in border color)
+                stroke(borderColor);
+                strokeWeight(totalWidth / zoomLevel);
+                strokeCap(SQUARE);
+                for (let w of wallData) {
+                    line(w.x1, w.y1, w.x2, w.y2);
+                }
 
-                for (let i = 0; i < coordinates.length; i++) {
-                    let start = coordinates[i];
-                    let end = coordinates[(i + 1) % coordinates.length];
-                    drawDashedLine(
-                        start[0] - centerX,
-                        start[1] - centerY,
-                        end[0] - centerX,
-                        end[1] - centerY,
-                    );
+                // Second pass: draw wall fill (thinner lines in wall color)
+                // This covers the border where walls meet at endpoints
+                strokeWeight(wallWidth / zoomLevel);
+                for (let w of wallData) {
+                    stroke(w.color);
+                    line(w.x1, w.y1, w.x2, w.y2);
                 }
             }
 
-            function drawDashedLine(x1, y1, x2, y2) {
-                let dashLength = 4 / zoomLevel;
-                let gapLength = 4 / zoomLevel;
+            function drawDashedOutline(canvasCoords, strokeColor, style) {
+                stroke(strokeColor);
+                strokeWeight(style.strokeWeight / zoomLevel);
+                strokeCap(SQUARE); // Flat ends instead of rounded
+                noFill();
+
+                for (let i = 0; i < canvasCoords.length; i++) {
+                    let start = canvasCoords[i];
+                    let end = canvasCoords[(i + 1) % canvasCoords.length];
+                    drawDashedLine(start[0], start[1], end[0], end[1], style);
+                }
+            }
+
+            function drawDashedLine(x1, y1, x2, y2, style) {
+                let dashLength = style.dashLength / zoomLevel;
+                let gapLength = style.dashGap / zoomLevel;
 
                 let xd = x2 - x1;
                 let yd = y2 - y1;
@@ -1621,6 +1858,164 @@
 
             function windowResized() {
                 resizeCanvas(windowWidth, windowHeight);
+            }
+
+            // Pan and zoom controls
+            let shiftDown = false;
+            let isZooming = false;
+            let zoomStartY = 0;
+            let zoomStartLevel = 1;
+            let zoomStartPanX = 0;
+            let zoomStartPanY = 0;
+            let zoomAnchorScreenX = 0;
+            let zoomAnchorScreenY = 0;
+
+            function mousePressed() {
+                if (shiftDown) {
+                    isZooming = true;
+                    zoomStartY = mouseY;
+                    zoomStartLevel = zoomLevel;
+                    zoomStartPanX = panX;
+                    zoomStartPanY = panY;
+                    // Store the screen position where zoom started
+                    zoomAnchorScreenX = mouseX;
+                    zoomAnchorScreenY = mouseY;
+                } else if (mouseButton === CENTER) {
+                    isPanning = true;
+                    lastMouseX = mouseX;
+                    lastMouseY = mouseY;
+                }
+            }
+
+            function mouseReleased() {
+                isPanning = false;
+                isZooming = false;
+            }
+
+            function mouseMoved() {
+                // Spacebar + mouse move to pan (no click required)
+                if (spacebarDown) {
+                    panX = spacebarStartPanX + (mouseX - spacebarStartMouseX);
+                    panY = spacebarStartPanY + (mouseY - spacebarStartMouseY);
+                }
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+            }
+
+            function mouseDragged() {
+                if (isZooming) {
+                    // Drag up to zoom in, drag down to zoom out
+                    const dragDistance = zoomStartY - mouseY;
+                    const newZoomLevel =
+                        zoomStartLevel * Math.pow(1.01, dragDistance);
+
+                    // Calculate world position of anchor at start of zoom
+                    const anchorWorldX =
+                        (zoomAnchorScreenX - width / 2 - zoomStartPanX) /
+                        zoomStartLevel;
+                    const anchorWorldY =
+                        (zoomAnchorScreenY - height / 2 - zoomStartPanY) /
+                        zoomStartLevel;
+
+                    // Calculate new pan to keep anchor point at same screen position
+                    panX =
+                        zoomAnchorScreenX -
+                        width / 2 -
+                        anchorWorldX * newZoomLevel;
+                    panY =
+                        zoomAnchorScreenY -
+                        height / 2 -
+                        anchorWorldY * newZoomLevel;
+
+                    zoomLevel = newZoomLevel;
+                } else if (isPanning) {
+                    panX += mouseX - lastMouseX;
+                    panY += mouseY - lastMouseY;
+                    lastMouseX = mouseX;
+                    lastMouseY = mouseY;
+                }
+            }
+
+            function mouseWheel(event) {
+                // Check if this is a pinch-to-zoom (ctrlKey is set) or regular scroll
+                if (event.ctrlKey) {
+                    // Pinch-to-zoom on trackpad - zoom centered on mouse pointer
+                    const oldZoom = zoomLevel;
+
+                    // Calculate world position under mouse before zoom
+                    const worldX = (mouseX - width / 2 - panX) / oldZoom;
+                    const worldY = (mouseY - height / 2 - panY) / oldZoom;
+
+                    // Apply zoom
+                    const zoomFactor = 1.1;
+                    if (event.delta > 0) {
+                        zoomLevel /= zoomFactor;
+                    } else {
+                        zoomLevel *= zoomFactor;
+                    }
+
+                    // Adjust pan so the same world point stays under the mouse
+                    panX = mouseX - width / 2 - worldX * zoomLevel;
+                    panY = mouseY - height / 2 - worldY * zoomLevel;
+                } else {
+                    // Regular scroll - pan the map
+                    panX -= event.deltaX;
+                    panY -= event.delta;
+                }
+
+                // Prevent default scroll behavior
+                return false;
+            }
+
+            function keyPressed() {
+                if (key === " ") {
+                    spacebarDown = true;
+                    spacebarStartMouseX = mouseX;
+                    spacebarStartMouseY = mouseY;
+                    spacebarStartPanX = panX;
+                    spacebarStartPanY = panY;
+                    document.body.style.cursor = "grabbing";
+                }
+                if (keyCode === SHIFT) {
+                    shiftDown = true;
+                }
+            }
+
+            function keyReleased() {
+                if (key === " ") {
+                    spacebarDown = false;
+                    document.body.style.cursor = "default";
+                }
+                if (keyCode === SHIFT) {
+                    shiftDown = false;
+                    isZooming = false;
+                }
+            }
+
+            // Touch controls for panning
+            function touchStarted() {
+                if (touches.length === 1) {
+                    isPanning = true;
+                    lastMouseX = touches[0].x;
+                    lastMouseY = touches[0].y;
+                }
+                // Prevent default to avoid scrolling the page
+                return false;
+            }
+
+            function touchMoved() {
+                if (isPanning && touches.length === 1) {
+                    panX += touches[0].x - lastMouseX;
+                    panY += touches[0].y - lastMouseY;
+                    lastMouseX = touches[0].x;
+                    lastMouseY = touches[0].y;
+                }
+                return false;
+            }
+
+            function touchEnded() {
+                isPanning = false;
+                return false;
             }
 
             function rotateObjects(angle) {
@@ -1689,6 +2084,8 @@
 
                     calculateCenter();
                     rotation = 0;
+                    panX = 0;
+                    panY = 0;
                 } catch (error) {
                     console.error("Error parsing input:", error);
                     alert("There's something wrong with the input JSON. 😭");
