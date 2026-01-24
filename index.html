@@ -628,6 +628,7 @@
                     <b>Zoom:</b> Hold <span class="kbd">Shift</span>, drag
                     vertically
                 </li>
+                <li><b>Zoom:</b> Trackpad pinch-to-zoom</li>
                 <li>
                     <b>Pan:</b> Hold <span class="kbd">Spacebar</span>, move
                     mouse
@@ -1946,13 +1947,13 @@
                     const worldX = (mouseX - width / 2 - panX) / oldZoom;
                     const worldY = (mouseY - height / 2 - panY) / oldZoom;
 
-                    // Apply zoom
-                    const zoomFactor = 1.1;
-                    if (event.delta > 0) {
-                        zoomLevel /= zoomFactor;
-                    } else {
-                        zoomLevel *= zoomFactor;
-                    }
+                    // Use the actual delta for smooth 1:1 pinch-to-zoom
+                    // Negative delta = zoom in, positive delta = zoom out
+                    const zoomSensitivity = 0.01;
+                    zoomLevel *= 1 - event.delta * zoomSensitivity;
+
+                    // Clamp zoom level to reasonable bounds
+                    zoomLevel = Math.max(0.01, Math.min(100, zoomLevel));
 
                     // Adjust pan so the same world point stays under the mouse
                     panX = mouseX - width / 2 - worldX * zoomLevel;
@@ -1966,6 +1967,13 @@
                 // Prevent default scroll behavior
                 return false;
             }
+
+            // Prevent spacebar from activating focused buttons
+            document.addEventListener("keydown", function (e) {
+                if (e.key === " " || e.code === "Space") {
+                    e.preventDefault();
+                }
+            });
 
             function keyPressed() {
                 if (key === " ") {
