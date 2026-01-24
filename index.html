@@ -408,6 +408,12 @@
             >
                 <i class="bx bx-info-circle"></i>
             </button>
+            <button class="tool-button" onclick="zoomIn()" title="Zoom In">
+                <i class="bx bx-zoom-in"></i>
+            </button>
+            <button class="tool-button" onclick="zoomOut()" title="Zoom Out">
+                <i class="bx bx-zoom-out"></i>
+            </button>
         </div>
 
         <!-- Right panel - Rotate tool options -->
@@ -1881,16 +1887,20 @@
                     // Store the screen position where zoom started
                     zoomAnchorScreenX = mouseX;
                     zoomAnchorScreenY = mouseY;
-                } else if (mouseButton === CENTER) {
+                } else if (mouseButton === RIGHT || mouseButton === CENTER) {
                     isPanning = true;
                     lastMouseX = mouseX;
                     lastMouseY = mouseY;
+                    document.body.style.cursor = "grabbing";
                 }
             }
 
             function mouseReleased() {
                 isPanning = false;
                 isZooming = false;
+                if (!spacebarDown) {
+                    document.body.style.cursor = "default";
+                }
             }
 
             function mouseMoved() {
@@ -1953,7 +1963,7 @@
                     zoomLevel *= 1 - event.delta * zoomSensitivity;
 
                     // Clamp zoom level to reasonable bounds
-                    zoomLevel = Math.max(0.01, Math.min(100, zoomLevel));
+                    zoomLevel = Math.max(0.01, Math.min(500, zoomLevel));
 
                     // Adjust pan so the same world point stays under the mouse
                     panX = mouseX - width / 2 - worldX * zoomLevel;
@@ -1968,11 +1978,42 @@
                 return false;
             }
 
+            function zoomIn() {
+                // Zoom in centered on the canvas
+                const oldZoom = zoomLevel;
+                const centerWorldX = (width / 2 - width / 2 - panX) / oldZoom;
+                const centerWorldY = (height / 2 - height / 2 - panY) / oldZoom;
+
+                zoomLevel *= 1.5;
+                zoomLevel = Math.max(0.01, Math.min(500, zoomLevel));
+
+                panX = width / 2 - width / 2 - centerWorldX * zoomLevel;
+                panY = height / 2 - height / 2 - centerWorldY * zoomLevel;
+            }
+
+            function zoomOut() {
+                // Zoom out centered on the canvas
+                const oldZoom = zoomLevel;
+                const centerWorldX = (width / 2 - width / 2 - panX) / oldZoom;
+                const centerWorldY = (height / 2 - height / 2 - panY) / oldZoom;
+
+                zoomLevel /= 1.5;
+                zoomLevel = Math.max(0.01, Math.min(500, zoomLevel));
+
+                panX = width / 2 - width / 2 - centerWorldX * zoomLevel;
+                panY = height / 2 - height / 2 - centerWorldY * zoomLevel;
+            }
+
             // Prevent spacebar from activating focused buttons
             document.addEventListener("keydown", function (e) {
                 if (e.key === " " || e.code === "Space") {
                     e.preventDefault();
                 }
+            });
+
+            // Disable context menu for right-click panning
+            document.addEventListener("contextmenu", function (e) {
+                e.preventDefault();
             });
 
             function keyPressed() {
