@@ -251,12 +251,12 @@
             }
 
             .toolbar-button.green {
-                background-color: #4caf50;
+                background-color: #16a34a;
                 color: var(--button-text);
             }
 
             .toolbar-button.green:hover {
-                background-color: #45a049;
+                background-color: #15803d;
             }
 
             @keyframes pulse-blue {
@@ -302,15 +302,44 @@
             .toast {
                 background-color: var(--panel-bg);
                 color: var(--text);
-                padding: 12px 20px;
                 border-radius: 6px;
                 box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.15);
                 font-size: 14px;
                 opacity: 1;
+                display: flex;
+                align-items: stretch;
+                overflow: hidden;
+            }
+
+            .toast-icon {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 12px;
+                color: white;
+                font-size: 18px;
+            }
+
+            .toast-icon.info {
+                background-color: #0ea5e9;
+            }
+
+            .toast-icon.success {
+                background-color: #16a34a;
+            }
+
+            .toast-icon.error {
+                background-color: #ef4444;
+            }
+
+            .toast-message {
+                padding: 12px 16px;
+                display: flex;
+                align-items: center;
             }
 
             .toast.fade-out {
-                animation: toast-out 0.3s ease forwards;
+                animation: toast-out 0.8s ease forwards;
             }
 
             @keyframes toast-out {
@@ -745,11 +774,32 @@
                 copyButton.classList.remove("pending");
             }
 
-            function showToast(message, duration = 2500) {
+            function showToast(message, type = "info", duration = 2500) {
                 const container = document.getElementById("toastContainer");
                 const toast = document.createElement("div");
                 toast.className = "toast";
-                toast.textContent = message;
+
+                // Icon configuration based on type
+                const iconConfig = {
+                    info: "bx-info-circle",
+                    success: "bx-check-circle",
+                    error: "bx-error", // alert-octagon equivalent in boxicons
+                };
+
+                const iconClass = iconConfig[type] || iconConfig.info;
+
+                // Create icon element
+                const iconDiv = document.createElement("div");
+                iconDiv.className = `toast-icon ${type}`;
+                iconDiv.innerHTML = `<i class="bx ${iconClass}"></i>`;
+
+                // Create message element
+                const messageDiv = document.createElement("div");
+                messageDiv.className = "toast-message";
+                messageDiv.textContent = message;
+
+                toast.appendChild(iconDiv);
+                toast.appendChild(messageDiv);
                 container.appendChild(toast);
 
                 setTimeout(() => {
@@ -764,12 +814,17 @@
                 try {
                     const text = await navigator.clipboard.readText();
                     jsonData = text;
-                    parseInput(text);
-                    showToast("Pasted from Hamina");
+                    if (parseInput(text)) {
+                        showToast(
+                            "Hamina clipboard pasted to the canvas.",
+                            "success",
+                        );
+                    }
                 } catch (error) {
                     console.error("Failed to read clipboard:", error);
-                    alert(
-                        "Could not read from clipboard. Please make sure you have copied Hamina objects and allowed clipboard access.",
+                    showToast(
+                        "Could not read from clipboard. Please allow clipboard access.",
+                        "error",
                     );
                 }
             }
@@ -2016,6 +2071,32 @@
                 e.preventDefault();
             });
 
+            // Handle Ctrl+V / Cmd+V paste
+            document.addEventListener("paste", function (e) {
+                // Don't intercept if user is typing in an input field
+                if (
+                    e.target.tagName === "INPUT" ||
+                    e.target.tagName === "TEXTAREA"
+                ) {
+                    return;
+                }
+                e.preventDefault();
+                pasteFromClipboard();
+            });
+
+            // Handle Ctrl+C / Cmd+C copy
+            document.addEventListener("copy", function (e) {
+                // Don't intercept if user is typing in an input field
+                if (
+                    e.target.tagName === "INPUT" ||
+                    e.target.tagName === "TEXTAREA"
+                ) {
+                    return;
+                }
+                e.preventDefault();
+                copyOutput();
+            });
+
             function keyPressed() {
                 if (key === " ") {
                     spacebarDown = true;
@@ -2135,9 +2216,14 @@
                     rotation = 0;
                     panX = 0;
                     panY = 0;
+                    return true;
                 } catch (error) {
                     console.error("Error parsing input:", error);
-                    alert("There's something wrong with the input JSON. 😭");
+                    showToast(
+                        "There's something wrong with the clipboard data. Make sure it's from Hamina.",
+                        "error",
+                    );
+                    return false;
                 }
             }
 
@@ -2231,10 +2317,16 @@
                     const output = JSON.stringify(rotatedObjects, null, 2);
                     navigator.clipboard.writeText(output).then(() => {
                         clearPendingChanges();
-                        showToast("Copied to clipboard");
+                        showToast(
+                            "Canvas copied to clipboard. Go paste it into Hamina.",
+                            "success",
+                        );
                     });
                 } else {
-                    alert("No objects to copy. Paste objects first.");
+                    showToast(
+                        "There aren't any objects on the canvas to copy to the clipboard.",
+                        "error",
+                    );
                 }
             }
 
@@ -2346,8 +2438,9 @@
 
             function convertObjectType() {
                 if (!objects) {
-                    alert(
-                        "No objects loaded. Please paste and render objects first.",
+                    showToast(
+                        "There aren't any objects on the canvas. Paste some in from Hamina first.",
+                        "error",
                     );
                     return;
                 }
@@ -2381,7 +2474,10 @@
                 }
 
                 if (allAreas.length === 0) {
-                    alert("No zones found to convert.");
+                    showToast(
+                        "There aren't any zones on the canvas to convert.",
+                        "error",
+                    );
                     return;
                 }
 
@@ -2473,7 +2569,7 @@
                 }
 
                 markChangesPending();
-                showToast("Objects converted");
+                showToast("Objects converted!", "success");
             }
 
             function generateCircle() {
@@ -2628,7 +2724,7 @@
                 }
 
                 markChangesPending();
-                showToast("Circle generated");
+                showToast("Circle generated!", "success");
             }
 
             function generateGrid() {
@@ -2840,7 +2936,7 @@
                 }
 
                 markChangesPending();
-                showToast("Grid generated");
+                showToast("Grid generated!", "success");
             }
         </script>
     </body>
