@@ -702,12 +702,16 @@
             let activeSnaps = []; // Array of { type, snapPoint, lineDir, otherDir } - all active snap indicators
             let draggedPoint = null; // { zoneType: string, zoneIndex: number, pointIndex: number }
             let isDraggingPoint = false;
+            let pointOfInterest = null; // { x, y } in world coords - point for X/Y axis snapping
+            let previousHoveredPoint = null; // { x, y } - the point hovered before current one
+            let axisSnap = null; // { axis: 'x' | 'y' | 'both', poiX, poiY } - active axis snap info
             const POINT_HANDLE_RADIUS = 6; // Radius of point handles in screen pixels
             const EDGE_HIT_TOLERANCE = 8; // Distance tolerance for clicking on edges
             const POINT_HOVER_TOLERANCE = 12; // Distance tolerance for hovering near points
             const SNAP_TOLERANCE = 15; // Distance tolerance for snapping to points
             const ANGLE_SNAP_TOLERANCE = 0.05; // Radians tolerance for angle snapping (~3 degrees)
             const SNAP_INDICATOR_LENGTH = 15; // Length of snap indicator lines in screen pixels
+            const AXIS_SNAP_TOLERANCE = 10; // Distance tolerance for X/Y axis snapping to POI
 
             // AP icon images
             let apIconBase;
@@ -2059,6 +2063,19 @@
                     if (pointHandle) {
                         isDraggingPoint = true;
                         draggedPoint = pointHandle;
+
+                        // If current POI is the point we're about to drag, use previous instead
+                        const draggedPos = getPointPosition(pointHandle);
+                        if (
+                            pointOfInterest &&
+                            draggedPos &&
+                            Math.abs(pointOfInterest.x - draggedPos.x) <
+                                0.0001 &&
+                            Math.abs(pointOfInterest.y - draggedPos.y) < 0.0001
+                        ) {
+                            pointOfInterest = previousHoveredPoint;
+                        }
+
                         document.body.style.cursor = "grabbing";
                         return;
                     }
@@ -2067,6 +2084,14 @@
                     const clickedZone = findZoneAtPoint(mouseX, mouseY);
                     if (clickedZone) {
                         selectedZone = clickedZone;
+                        // Clear POI if it's part of the newly selected zone
+                        if (
+                            pointOfInterest &&
+                            isPointPartOfZone(pointOfInterest, clickedZone)
+                        ) {
+                            pointOfInterest = null;
+                            previousHoveredPoint = null;
+                        }
                     } else {
                         // Clicked on empty space - deselect
                         selectedZone = null;
@@ -2095,8 +2120,8 @@
                     panY = spacebarStartPanY + (mouseY - spacebarStartMouseY);
                     hoveredZone = null;
                     hoveredPoint = null;
-                } else if (!isPanning && !isZooming && !isDraggingPoint) {
-                    // Check for nearby points first
+                } else if (!isPanning && !isZooming) {
+                    // Always check for nearby points to update POI
                     const worldPos = screenToWorld(mouseX, mouseY);
                     const nearestPoint = findNearestPoint(
                         worldPos.x + centerX,
@@ -2104,27 +2129,79 @@
                     );
                     const tolerance = POINT_HOVER_TOLERANCE / zoomLevel;
 
+                    let currentPointUnderMouse = null;
                     if (nearestPoint && nearestPoint.distance < tolerance) {
-                        hoveredPoint = { x: nearestPoint.x, y: nearestPoint.y };
-                        hoveredZone = null;
-                        document.body.style.cursor = "grab";
-                    } else {
-                        hoveredPoint = null;
-                        // Update cursor and hover state based on what's under the mouse
-                        const pointHandle = findPointHandleAtPoint(
-                            mouseX,
-                            mouseY,
-                        );
-                        if (pointHandle) {
-                            document.body.style.cursor = "grab";
+                        currentPointUnderMouse = {
+                            x: nearestPoint.x,
+                            y: nearestPoint.y,
+                        };
+                    }
+
+                    // Update POI when moving to a different point
+                    // POI rules: can't be part of selected zone, can't be the point being dragged
+                    if (currentPointUnderMouse) {
+                        const isDifferentPoint =
+                            !pointOfInterest ||
+                            Math.abs(
+                                pointOfInterest.x - currentPointUnderMouse.x,
+                            ) > 0.0001 ||
+                            Math.abs(
+                                pointOfInterest.y - currentPointUnderMouse.y,
+                            ) > 0.0001;
+
+                        const isPartOfSelectedZone =
+                            selectedZone &&
+                            isPointPartOfZone(
+                                currentPointUnderMouse,
+                                selectedZone,
+                            );
+
+                        const isCurrentDraggedPoint =
+                            isDraggingPoint &&
+                            draggedPoint &&
+                            isPointBeingDragged(
+                                currentPointUnderMouse,
+                                draggedPoint,
+                            );
+
+                        if (
+                            isDifferentPoint &&
+                            !isPartOfSelectedZone &&
+                            !isCurrentDraggedPoint
+                        ) {
+                            // Set current POI as previous, then update POI
+                            previousHoveredPoint = pointOfInterest;
+                            pointOfInterest = {
+                                x: currentPointUnderMouse.x,
+                                y: currentPointUnderMouse.y,
+                            };
+                        }
+                    }
+
+                    // Only update hover visuals when not dragging
+                    if (!isDraggingPoint) {
+                        if (currentPointUnderMouse) {
+                            hoveredPoint = currentPointUnderMouse;
                             hoveredZone = null;
+                            document.body.style.cursor = "grab";
                         } else {
-                            const zone = findZoneAtPoint(mouseX, mouseY);
-                            hoveredZone = zone;
-                            if (zone) {
-                                document.body.style.cursor = "pointer";
+                            hoveredPoint = null;
+                            // Update cursor and hover state based on what's under the mouse
+                            const pointHandle = findPointHandleAtPoint(
+                                mouseX,
+                                mouseY,
+                            );
+                            if (pointHandle) {
+                                document.body.style.cursor = "grab";
+                                hoveredZone = null;
                             } else {
-                                document.body.style.cursor = "default";
+                                const zone = findZoneAtPoint(mouseX, mouseY);
+                                hoveredZone = zone;
+                                if (zone) {
+                                    document.body.style.cursor = "pointer";
+                                } else {
+                                    document.body.style.cursor = "default";
+                                }
                             }
                         }
                     }
@@ -2143,6 +2220,7 @@
                     // Reset snap state
                     snapTargetPoint = null;
                     activeSnaps = [];
+                    axisSnap = null;
 
                     // Check for snap to existing point (highest priority)
                     const snapTolerance = SNAP_TOLERANCE / zoomLevel;
@@ -2162,7 +2240,7 @@
                         };
                         activeSnaps = [];
                     } else {
-                        // Check for angle snaps (straight line or 90°)
+                        // Check for angle snaps (colinear or perpendicular)
                         // Try to find a position that satisfies multiple constraints
                         const bestSnap = findBestMultiSnapPosition(
                             newX,
@@ -2176,6 +2254,56 @@
                             activeSnaps = bestSnap.activeSnaps;
                         } else {
                             activeSnaps = [];
+                        }
+
+                        // Check for X/Y axis snap to Point of Interest
+                        // This works alongside other snaps
+                        if (pointOfInterest) {
+                            const axisTolerance =
+                                AXIS_SNAP_TOLERANCE / zoomLevel;
+                            const xDiff = Math.abs(newX - pointOfInterest.x);
+                            const yDiff = Math.abs(newY - pointOfInterest.y);
+
+                            // Don't snap to POI if it's the point we're dragging
+                            const isPOIDragged =
+                                Math.abs(
+                                    pointOfInterest.x - (worldPos.x + centerX),
+                                ) < 0.0001 &&
+                                Math.abs(
+                                    pointOfInterest.y - (worldPos.y + centerY),
+                                ) < 0.0001;
+
+                            if (!isPOIDragged) {
+                                if (
+                                    xDiff < axisTolerance &&
+                                    yDiff < axisTolerance
+                                ) {
+                                    // Snap to both X and Y (coincident)
+                                    newX = pointOfInterest.x;
+                                    newY = pointOfInterest.y;
+                                    axisSnap = {
+                                        axis: "both",
+                                        poiX: pointOfInterest.x,
+                                        poiY: pointOfInterest.y,
+                                    };
+                                } else if (xDiff < axisTolerance) {
+                                    // Snap to X axis (vertical alignment)
+                                    newX = pointOfInterest.x;
+                                    axisSnap = {
+                                        axis: "x",
+                                        poiX: pointOfInterest.x,
+                                        poiY: pointOfInterest.y,
+                                    };
+                                } else if (yDiff < axisTolerance) {
+                                    // Snap to Y axis (horizontal alignment)
+                                    newY = pointOfInterest.y;
+                                    axisSnap = {
+                                        axis: "y",
+                                        poiX: pointOfInterest.x,
+                                        poiY: pointOfInterest.y,
+                                    };
+                                }
+                            }
                         }
                     }
 
@@ -2443,6 +2571,88 @@
                 return null;
             }
 
+            // Check if a point is part of a selected zone
+            function isPointPartOfZone(point, zone) {
+                if (!point || !zone || !objects) return false;
+
+                if (zone.type === "wall") {
+                    const wall = objects.walls?.[zone.index];
+                    if (!wall) return false;
+
+                    const startEndpoint = objects.wallEndpoints?.find(
+                        (e) => e.id === wall.startId,
+                    );
+                    const endEndpoint = objects.wallEndpoints?.find(
+                        (e) => e.id === wall.endId,
+                    );
+
+                    if (
+                        startEndpoint &&
+                        Math.abs(startEndpoint.x - point.x) < 0.0001 &&
+                        Math.abs(startEndpoint.y - point.y) < 0.0001
+                    ) {
+                        return true;
+                    }
+                    if (
+                        endEndpoint &&
+                        Math.abs(endEndpoint.x - point.x) < 0.0001 &&
+                        Math.abs(endEndpoint.y - point.y) < 0.0001
+                    ) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                // For zones, check all vertices
+                const coords = getZoneCoords(zone.type, zone.index);
+                if (!coords) return false;
+
+                for (const coord of coords) {
+                    if (
+                        Math.abs(coord[0] - point.x) < 0.0001 &&
+                        Math.abs(coord[1] - point.y) < 0.0001
+                    ) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Check if a point is the one currently being dragged
+            function isPointBeingDragged(point, dragPoint) {
+                if (!point || !dragPoint) return false;
+                const draggedPos = getPointPosition(dragPoint);
+                if (!draggedPos) return false;
+                return (
+                    Math.abs(draggedPos.x - point.x) < 0.0001 &&
+                    Math.abs(draggedPos.y - point.y) < 0.0001
+                );
+            }
+
+            // Get the world position of a point handle
+            function getPointPosition(pointHandle) {
+                if (!pointHandle || !objects) return null;
+
+                if (pointHandle.zoneType === "wall" && pointHandle.endpointId) {
+                    const endpoint = objects.wallEndpoints?.find(
+                        (e) => e.id === pointHandle.endpointId,
+                    );
+                    return endpoint ? { x: endpoint.x, y: endpoint.y } : null;
+                }
+
+                const coords = getZoneCoords(
+                    pointHandle.zoneType,
+                    pointHandle.zoneIndex,
+                );
+                if (coords && pointHandle.pointIndex < coords.length) {
+                    return {
+                        x: coords[pointHandle.pointIndex][0],
+                        y: coords[pointHandle.pointIndex][1],
+                    };
+                }
+                return null;
+            }
+
             // Helper to get zone coordinates by type and index
             function getZoneCoords(type, index) {
                 if (!objects) return null;
@@ -2577,10 +2787,9 @@
                     }
                 }
 
-                // Also add constraints at the dragged point itself
-                // These check if segments from the dragged point to connected endpoints
-                // are colinear or perpendicular to each other
-                // We need at least 2 connected endpoints for this to make sense
+                // Also add colinear constraints at the dragged point itself
+                // These check if segments from the dragged point to connected endpoints are colinear
+                // (Perpendicular constraints at dragged point form a circle, not a line, so we skip them)
                 if (connectedEndpoints.length >= 2) {
                     for (let i = 0; i < connectedEndpoints.length; i++) {
                         for (
@@ -2588,23 +2797,11 @@
                             j < connectedEndpoints.length;
                             j++
                         ) {
-                            const ep1 = connectedEndpoints[i];
-                            const ep2 = connectedEndpoints[j];
-
-                            // Add constraint: segments to ep1 and ep2 should be colinear (180°)
                             constraints.push({
                                 atDraggedPoint: true,
                                 snapType: "colinear",
-                                endpoint1: ep1,
-                                endpoint2: ep2,
-                            });
-
-                            // Add constraint: segments to ep1 and ep2 should be perpendicular (90°)
-                            constraints.push({
-                                atDraggedPoint: true,
-                                snapType: "perpendicular",
-                                endpoint1: ep1,
-                                endpoint2: ep2,
+                                endpoint1: connectedEndpoints[i],
+                                endpoint2: connectedEndpoints[j],
                             });
                         }
                     }
@@ -2615,8 +2812,8 @@
                 // Helper to check if a position satisfies a constraint
                 function satisfiesConstraint(x, y, constraint) {
                     if (constraint.atDraggedPoint) {
-                        // For constraints at the dragged point, check if the angle between
-                        // segments to endpoint1 and endpoint2 matches the constraint type
+                        // For colinear constraints at the dragged point, check if
+                        // the point lies on the line through endpoint1 and endpoint2
                         const ep1 = constraint.endpoint1;
                         const ep2 = constraint.endpoint2;
 
@@ -2636,16 +2833,8 @@
                             normalizeAngle(angle1 - angle2),
                         );
 
-                        if (constraint.snapType === "colinear") {
-                            // Segments should be 180° apart (straight line through dragged point)
-                            return Math.abs(angleBetween - Math.PI) < tolerance;
-                        } else if (constraint.snapType === "perpendicular") {
-                            // Segments should be 90° apart
-                            return (
-                                Math.abs(angleBetween - Math.PI / 2) < tolerance
-                            );
-                        }
-                        return false;
+                        // Segments should be 180° apart (straight line through dragged point)
+                        return Math.abs(angleBetween - Math.PI) < tolerance;
                     }
 
                     // For constraints at connected endpoints (not the dragged point)
@@ -2660,24 +2849,16 @@
                 }
 
                 // Helper to get the constraint line (point + angle) for any constraint
-                // For constraints at connected endpoints: uses pivotX, pivotY, angle directly
-                // For colinear constraints at dragged point: line through endpoint1 and endpoint2
-                // For perpendicular constraints at dragged point: returns null (not a simple line)
                 function getConstraintLine(c) {
                     if (c.atDraggedPoint) {
-                        if (c.snapType === "colinear") {
-                            // Line through endpoint1 and endpoint2
-                            const dx = c.endpoint2.x - c.endpoint1.x;
-                            const dy = c.endpoint2.y - c.endpoint1.y;
-                            const angle = Math.atan2(dy, dx);
-                            return {
-                                px: c.endpoint1.x,
-                                py: c.endpoint1.y,
-                                angle: angle,
-                            };
-                        }
-                        // Perpendicular constraint at dragged point is not a simple line
-                        return null;
+                        // Colinear constraint: line through endpoint1 and endpoint2
+                        const dx = c.endpoint2.x - c.endpoint1.x;
+                        const dy = c.endpoint2.y - c.endpoint1.y;
+                        return {
+                            px: c.endpoint1.x,
+                            py: c.endpoint1.y,
+                            angle: Math.atan2(dy, dx),
+                        };
                     }
                     return {
                         px: c.pivotX,
@@ -2803,6 +2984,16 @@
 
                 if (!bestPosition || bestSatisfiedCount === 0) return null;
 
+                // Check if the position actually moved (snap is in effect)
+                const snapDelta = Math.sqrt(
+                    (bestPosition.x - newX) ** 2 + (bestPosition.y - newY) ** 2,
+                );
+                const minSnapDelta = 0.0001; // Minimum movement to consider it a snap
+                if (snapDelta < minSnapDelta) {
+                    // Position didn't change - no snap is active
+                    return null;
+                }
+
                 // Build the activeSnaps array for the best position
                 for (const c of constraints) {
                     if (
@@ -2813,43 +3004,44 @@
                         let snapPoint, lineDir, otherDir;
 
                         if (c.atDraggedPoint) {
+                            // Colinear constraint at dragged point - show line indicator
                             snapPoint = {
                                 x: bestPosition.x,
                                 y: bestPosition.y,
                             };
-                            // Calculate directions to the two endpoints
-                            const ep1 = c.endpoint1;
-                            const ep2 = c.endpoint2;
-
-                            const dx1 = ep1.x - bestPosition.x;
-                            const dy1 = ep1.y - bestPosition.y;
-                            const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-
-                            const dx2 = ep2.x - bestPosition.x;
-                            const dy2 = ep2.y - bestPosition.y;
-                            const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-
-                            if (len1 > 0.001 && len2 > 0.001) {
-                                // For colinear, show line along one direction
-                                // For perpendicular, show L-shape with both directions
-                                lineDir = {
-                                    x: dx1 / len1,
-                                    y: dy1 / len1,
-                                };
-                                if (c.snapType === "perpendicular") {
-                                    otherDir = {
-                                        x: dx2 / len2,
-                                        y: dy2 / len2,
-                                    };
-                                }
+                            const dx = c.endpoint1.x - bestPosition.x;
+                            const dy = c.endpoint1.y - bestPosition.y;
+                            const len = Math.sqrt(dx * dx + dy * dy);
+                            if (len > 0.001) {
+                                lineDir = { x: dx / len, y: dy / len };
                             }
                         } else {
                             snapPoint = { x: c.pivotX, y: c.pivotY };
-                            lineDir = {
-                                x: Math.cos(c.angle),
-                                y: Math.sin(c.angle),
-                            };
+
+                            // For the indicator, show actual segment directions from the pivot
+                            // lineDir: direction from pivot to the dragged point (snapped position)
+                            // otherDir: direction from pivot to the reference segment's other end
+                            const toDraggedX = bestPosition.x - c.pivotX;
+                            const toDraggedY = bestPosition.y - c.pivotY;
+                            const toDraggedLen = Math.sqrt(
+                                toDraggedX * toDraggedX +
+                                    toDraggedY * toDraggedY,
+                            );
+
+                            if (toDraggedLen > 0.001) {
+                                lineDir = {
+                                    x: toDraggedX / toDraggedLen,
+                                    y: toDraggedY / toDraggedLen,
+                                };
+                            } else {
+                                lineDir = {
+                                    x: Math.cos(c.angle),
+                                    y: Math.sin(c.angle),
+                                };
+                            }
+
                             if (c.snapType === "perpendicular") {
+                                // otherDir points along the reference segment (away from pivot)
                                 otherDir = {
                                     x: Math.cos(c.refAngle),
                                     y: Math.sin(c.refAngle),
@@ -3384,6 +3576,31 @@
                     drawAllSnapIndicators();
                 }
 
+                // Draw axis snap indicator (red dashed line to POI)
+                if (isDraggingPoint && axisSnap) {
+                    drawAxisSnapIndicator();
+                }
+
+                // Draw Point of Interest indicator (grey outlined circle)
+                if (pointOfInterest) {
+                    const poiWorldX = pointOfInterest.x - centerX;
+                    const poiWorldY = pointOfInterest.y - centerY;
+                    const poiScreenPos = worldToScreen(poiWorldX, poiWorldY);
+
+                    push();
+                    resetMatrix();
+                    fill(255);
+                    stroke("#9A999C");
+                    strokeWeight(2);
+                    ellipse(
+                        poiScreenPos.x,
+                        poiScreenPos.y,
+                        POINT_HANDLE_RADIUS * 2,
+                        POINT_HANDLE_RADIUS * 2,
+                    );
+                    pop();
+                }
+
                 if (!pointToDraw) return;
 
                 // Don't show hovered point if we have a selected zone with handles
@@ -3422,6 +3639,72 @@
                     drawingContext.setLineDash([]); // Reset to solid
                 }
 
+                pop();
+            }
+
+            // Draw axis snap indicator line from current point to Point of Interest
+            function drawAxisSnapIndicator() {
+                if (!axisSnap || !draggedPoint) return;
+
+                // Get current dragged point position
+                let currentX, currentY;
+                if (
+                    draggedPoint.zoneType === "wall" &&
+                    draggedPoint.endpointId
+                ) {
+                    const endpoint = objects.wallEndpoints?.find(
+                        (e) => e.id === draggedPoint.endpointId,
+                    );
+                    if (!endpoint) return;
+                    currentX = endpoint.x;
+                    currentY = endpoint.y;
+                } else {
+                    const coords = getZoneCoords(
+                        draggedPoint.zoneType,
+                        draggedPoint.zoneIndex,
+                    );
+                    if (!coords || draggedPoint.pointIndex >= coords.length)
+                        return;
+                    currentX = coords[draggedPoint.pointIndex][0];
+                    currentY = coords[draggedPoint.pointIndex][1];
+                }
+
+                const currentScreen = worldToScreen(
+                    currentX - centerX,
+                    currentY - centerY,
+                );
+                const poiScreen = worldToScreen(
+                    axisSnap.poiX - centerX,
+                    axisSnap.poiY - centerY,
+                );
+
+                push();
+                resetMatrix();
+
+                stroke("#FF0000");
+                strokeWeight(2);
+                drawingContext.setLineDash([4, 3]); // Dashed line pattern
+
+                if (axisSnap.axis === "x" || axisSnap.axis === "both") {
+                    // Draw vertical line (X axis alignment)
+                    line(
+                        currentScreen.x,
+                        currentScreen.y,
+                        currentScreen.x,
+                        poiScreen.y,
+                    );
+                }
+                if (axisSnap.axis === "y" || axisSnap.axis === "both") {
+                    // Draw horizontal line (Y axis alignment)
+                    line(
+                        currentScreen.x,
+                        currentScreen.y,
+                        poiScreen.x,
+                        currentScreen.y,
+                    );
+                }
+
+                drawingContext.setLineDash([]); // Reset to solid
                 pop();
             }
 
