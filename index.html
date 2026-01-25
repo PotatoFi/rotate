@@ -694,6 +694,21 @@
             let spacebarStartPanX = 0;
             let spacebarStartPanY = 0;
 
+            // Selection state
+            let selectedZone = null; // { type: 'attenuatingZone', index: number }
+            let hoveredZone = null; // { type: 'wall', index: number } - for hover effects
+            let hoveredPoint = null; // { x, y } in world coords - point near cursor
+            let snapTargetPoint = null; // { x, y } in world coords - point to snap to while dragging
+            let activeSnaps = []; // Array of { type, snapPoint, lineDir, otherDir } - all active snap indicators
+            let draggedPoint = null; // { zoneType: string, zoneIndex: number, pointIndex: number }
+            let isDraggingPoint = false;
+            const POINT_HANDLE_RADIUS = 6; // Radius of point handles in screen pixels
+            const EDGE_HIT_TOLERANCE = 8; // Distance tolerance for clicking on edges
+            const POINT_HOVER_TOLERANCE = 12; // Distance tolerance for hovering near points
+            const SNAP_TOLERANCE = 15; // Distance tolerance for snapping to points
+            const ANGLE_SNAP_TOLERANCE = 0.05; // Radians tolerance for angle snapping (~3 degrees)
+            const SNAP_INDICATOR_LENGTH = 15; // Length of snap indicator lines in screen pixels
+
             // AP icon images
             let apIconBase;
             let apIconMask;
@@ -1645,40 +1660,58 @@
 
                 // Draw attenuating zones
                 if (objects && objects.attenuatingZones) {
-                    for (let zone of objects.attenuatingZones) {
+                    for (let i = 0; i < objects.attenuatingZones.length; i++) {
+                        const zone = objects.attenuatingZones[i];
                         const type = objects.attenuatingZoneTypes?.find(
                             (t) => t.id === zone.typeId,
                         );
                         const zoneColor =
                             type && type.color ? type.color : "#7AC2AF";
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "attenuatingZone" &&
+                            selectedZone.index === i;
                         drawZone(
                             zone.area.coordinates[0],
                             zoneColor,
                             zoneStyles.attenuatingZone,
+                            isSelected,
                         );
                     }
                 }
 
                 // Draw scope zones
                 if (objects && objects.scopeZones) {
-                    for (let zone of objects.scopeZones) {
+                    for (let i = 0; i < objects.scopeZones.length; i++) {
+                        const zone = objects.scopeZones[i];
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "scopeZone" &&
+                            selectedZone.index === i;
                         drawZone(
                             zone.area.coordinates[0],
                             zoneStyles.scopeZone.color,
                             zoneStyles.scopeZone,
+                            isSelected,
                         );
                     }
                 }
 
                 // Draw hole in floor zones (INCLUDE = floor hole, EXCLUDE = building edge)
                 if (objects && objects.holeInFloorZones) {
-                    for (let zone of objects.holeInFloorZones) {
+                    for (let i = 0; i < objects.holeInFloorZones.length; i++) {
+                        const zone = objects.holeInFloorZones[i];
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "holeInFloorZone" &&
+                            selectedZone.index === i;
                         if (zone.type === "INCLUDE") {
                             // Floor hole - shadow inside
                             drawZone(
                                 zone.area.coordinates[0],
                                 zoneStyles.floorHole.color,
                                 zoneStyles.floorHole,
+                                isSelected,
                             );
                         } else {
                             // Building edge - shadow outside
@@ -1686,6 +1719,7 @@
                                 zone.area.coordinates[0],
                                 zoneStyles.buildingEdge.color,
                                 zoneStyles.buildingEdge,
+                                isSelected,
                             );
                         }
                     }
@@ -1693,11 +1727,17 @@
 
                 // Draw capacity zones
                 if (objects && objects.capacityZones) {
-                    for (let zone of objects.capacityZones) {
+                    for (let i = 0; i < objects.capacityZones.length; i++) {
+                        const zone = objects.capacityZones[i];
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "capacityZone" &&
+                            selectedZone.index === i;
                         drawZone(
                             zone.area.coordinates[0],
                             zoneStyles.capacityZone.color,
                             zoneStyles.capacityZone,
+                            isSelected,
                         );
                     }
                 }
@@ -1725,6 +1765,12 @@
                         );
                     }
                 }
+
+                // Draw selection handles (after everything else)
+                drawSelectedZoneHandles();
+
+                // Draw hovered point indicator (or snap target when dragging)
+                drawHoveredPoint();
             }
 
             function darkenColor(hexColor, factor) {
@@ -1736,7 +1782,12 @@
                 return color(r, g, b);
             }
 
-            function drawZone(coordinates, zoneColor, style) {
+            function drawZone(
+                coordinates,
+                zoneColor,
+                style,
+                isSelected = false,
+            ) {
                 // Transform coordinates to canvas space
                 const canvasCoords = coordinates.map((coord) => [
                     coord[0] - centerX,
@@ -1762,8 +1813,12 @@
                     strokeColor = darkenColor(zoneColor, style.strokeDarken);
                 }
 
-                // Draw dashed outline
-                drawDashedOutline(canvasCoords, strokeColor, style);
+                // Draw outline - solid if selected, dashed otherwise
+                if (isSelected) {
+                    drawSolidOutline(canvasCoords, strokeColor, style);
+                } else {
+                    drawDashedOutline(canvasCoords, strokeColor, style);
+                }
             }
 
             function drawAccessPoint(x, y, apColor) {
@@ -1830,15 +1885,29 @@
                 pop();
             }
 
+            // Darken a color by a given factor (0.0 to 1.0)
+            function darkenColorBy(hexColor, factor) {
+                let c = color(hexColor);
+                let r = Math.round(red(c) * factor);
+                let g = Math.round(green(c) * factor);
+                let b = Math.round(blue(c) * factor);
+                return color(r, g, b);
+            }
+
             function drawWalls() {
                 const wallWidth = 4;
                 const borderWidth = 1;
                 const totalWidth = wallWidth + borderWidth * 2;
                 const borderColor = "#333333";
 
+                // Color darkening factors for hover and selected states
+                const hoverDarkenFactor = 0.85;
+                const selectedDarkenFactor = 0.7;
+
                 // Collect wall data for rendering
                 const wallData = [];
-                for (let wall of objects.walls) {
+                for (let i = 0; i < objects.walls.length; i++) {
+                    const wall = objects.walls[i];
                     const wallType = objects.wallTypes.find(
                         (t) => t.id === wall.materialId,
                     );
@@ -1850,20 +1919,44 @@
                     );
 
                     if (wallType && startEndpoint && endEndpoint) {
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "wall" &&
+                            selectedZone.index === i;
+                        const isHovered =
+                            hoveredZone &&
+                            hoveredZone.type === "wall" &&
+                            hoveredZone.index === i;
+
+                        // Determine wall color based on state
+                        let wallColor = wallType.color || "#000000";
+                        if (isSelected) {
+                            wallColor = darkenColorBy(
+                                wallColor,
+                                selectedDarkenFactor,
+                            );
+                        } else if (isHovered) {
+                            wallColor = darkenColorBy(
+                                wallColor,
+                                hoverDarkenFactor,
+                            );
+                        }
+
                         wallData.push({
                             x1: startEndpoint.x - centerX,
                             y1: startEndpoint.y - centerY,
                             x2: endEndpoint.x - centerX,
                             y2: endEndpoint.y - centerY,
-                            color: wallType.color || "#000000",
+                            color: wallColor,
+                            isSelected: isSelected,
                         });
                     }
                 }
 
                 // First pass: draw borders (thick lines in border color)
+                strokeCap(SQUARE);
                 stroke(borderColor);
                 strokeWeight(totalWidth / zoomLevel);
-                strokeCap(SQUARE);
                 for (let w of wallData) {
                     line(w.x1, w.y1, w.x2, w.y2);
                 }
@@ -1887,6 +1980,19 @@
                     let start = canvasCoords[i];
                     let end = canvasCoords[(i + 1) % canvasCoords.length];
                     drawDashedLine(start[0], start[1], end[0], end[1], style);
+                }
+            }
+
+            function drawSolidOutline(canvasCoords, strokeColor, style) {
+                stroke(strokeColor);
+                strokeWeight(style.strokeWeight / zoomLevel);
+                strokeCap(SQUARE);
+                noFill();
+
+                for (let i = 0; i < canvasCoords.length; i++) {
+                    let start = canvasCoords[i];
+                    let end = canvasCoords[(i + 1) % canvasCoords.length];
+                    line(start[0], start[1], end[0], end[1]);
                 }
             }
 
@@ -1947,12 +2053,36 @@
                     lastMouseX = mouseX;
                     lastMouseY = mouseY;
                     document.body.style.cursor = "grabbing";
+                } else if (mouseButton === LEFT && !spacebarDown) {
+                    // Check if clicking on a point handle of selected zone
+                    const pointHandle = findPointHandleAtPoint(mouseX, mouseY);
+                    if (pointHandle) {
+                        isDraggingPoint = true;
+                        draggedPoint = pointHandle;
+                        document.body.style.cursor = "grabbing";
+                        return;
+                    }
+
+                    // Check if clicking on a zone edge
+                    const clickedZone = findZoneAtPoint(mouseX, mouseY);
+                    if (clickedZone) {
+                        selectedZone = clickedZone;
+                    } else {
+                        // Clicked on empty space - deselect
+                        selectedZone = null;
+                    }
                 }
             }
 
             function mouseReleased() {
                 isPanning = false;
                 isZooming = false;
+                if (isDraggingPoint) {
+                    isDraggingPoint = false;
+                    draggedPoint = null;
+                    snapTargetPoint = null;
+                    activeSnaps = [];
+                }
                 if (!spacebarDown) {
                     document.body.style.cursor = "default";
                 }
@@ -1963,13 +2093,118 @@
                 if (spacebarDown) {
                     panX = spacebarStartPanX + (mouseX - spacebarStartMouseX);
                     panY = spacebarStartPanY + (mouseY - spacebarStartMouseY);
+                    hoveredZone = null;
+                    hoveredPoint = null;
+                } else if (!isPanning && !isZooming && !isDraggingPoint) {
+                    // Check for nearby points first
+                    const worldPos = screenToWorld(mouseX, mouseY);
+                    const nearestPoint = findNearestPoint(
+                        worldPos.x + centerX,
+                        worldPos.y + centerY,
+                    );
+                    const tolerance = POINT_HOVER_TOLERANCE / zoomLevel;
+
+                    if (nearestPoint && nearestPoint.distance < tolerance) {
+                        hoveredPoint = { x: nearestPoint.x, y: nearestPoint.y };
+                        hoveredZone = null;
+                        document.body.style.cursor = "grab";
+                    } else {
+                        hoveredPoint = null;
+                        // Update cursor and hover state based on what's under the mouse
+                        const pointHandle = findPointHandleAtPoint(
+                            mouseX,
+                            mouseY,
+                        );
+                        if (pointHandle) {
+                            document.body.style.cursor = "grab";
+                            hoveredZone = null;
+                        } else {
+                            const zone = findZoneAtPoint(mouseX, mouseY);
+                            hoveredZone = zone;
+                            if (zone) {
+                                document.body.style.cursor = "pointer";
+                            } else {
+                                document.body.style.cursor = "default";
+                            }
+                        }
+                    }
                 }
                 lastMouseX = mouseX;
                 lastMouseY = mouseY;
             }
 
             function mouseDragged() {
-                if (isZooming) {
+                if (isDraggingPoint && draggedPoint) {
+                    // Convert current mouse position to world coordinates
+                    const worldPos = screenToWorld(mouseX, mouseY);
+                    let newX = worldPos.x + centerX;
+                    let newY = worldPos.y + centerY;
+
+                    // Reset snap state
+                    snapTargetPoint = null;
+                    activeSnaps = [];
+
+                    // Check for snap to existing point (highest priority)
+                    const snapTolerance = SNAP_TOLERANCE / zoomLevel;
+                    const nearestPoint = findNearestPoint(
+                        newX,
+                        newY,
+                        draggedPoint,
+                    );
+
+                    if (nearestPoint && nearestPoint.distance < snapTolerance) {
+                        // Snap to the nearest point
+                        newX = nearestPoint.x;
+                        newY = nearestPoint.y;
+                        snapTargetPoint = {
+                            x: nearestPoint.x,
+                            y: nearestPoint.y,
+                        };
+                        activeSnaps = [];
+                    } else {
+                        // Check for angle snaps (straight line or 90°)
+                        // Try to find a position that satisfies multiple constraints
+                        const bestSnap = findBestMultiSnapPosition(
+                            newX,
+                            newY,
+                            draggedPoint,
+                        );
+
+                        if (bestSnap) {
+                            newX = bestSnap.x;
+                            newY = bestSnap.y;
+                            activeSnaps = bestSnap.activeSnaps;
+                        } else {
+                            activeSnaps = [];
+                        }
+                    }
+
+                    // Handle wall endpoints - moving an endpoint moves all walls connected to it
+                    if (
+                        draggedPoint.zoneType === "wall" &&
+                        draggedPoint.endpointId
+                    ) {
+                        const endpoint = objects.wallEndpoints?.find(
+                            (e) => e.id === draggedPoint.endpointId,
+                        );
+                        if (endpoint) {
+                            endpoint.x = newX;
+                            endpoint.y = newY;
+                            markChangesPending();
+                        }
+                    } else {
+                        // Handle zone types
+                        const coords = getZoneCoords(
+                            draggedPoint.zoneType,
+                            draggedPoint.zoneIndex,
+                        );
+                        if (coords && draggedPoint.pointIndex < coords.length) {
+                            coords[draggedPoint.pointIndex][0] = newX;
+                            coords[draggedPoint.pointIndex][1] = newY;
+                            markChangesPending();
+                        }
+                    }
+                } else if (isZooming) {
                     // Drag up to zoom in, drag down to zoom out
                     const dragDistance = zoomStartY - mouseY;
                     const newZoomLevel =
@@ -2057,6 +2292,1193 @@
 
                 panX = width / 2 - width / 2 - centerWorldX * zoomLevel;
                 panY = height / 2 - height / 2 - centerWorldY * zoomLevel;
+            }
+
+            // Convert screen coordinates to world coordinates (before rotation)
+            function screenToWorld(screenX, screenY) {
+                // Remove screen center offset and pan
+                const x = (screenX - width / 2 - panX) / zoomLevel;
+                const y = (screenY - height / 2 - panY) / zoomLevel;
+
+                // Reverse rotation
+                const cosR = cos(-rotation);
+                const sinR = sin(-rotation);
+                const worldX = x * cosR - y * sinR;
+                const worldY = x * sinR + y * cosR;
+
+                return { x: worldX, y: worldY };
+            }
+
+            // Convert world coordinates to screen coordinates
+            function worldToScreen(worldX, worldY) {
+                // Apply rotation
+                const cosR = cos(rotation);
+                const sinR = sin(rotation);
+                const rotX = worldX * cosR - worldY * sinR;
+                const rotY = worldX * sinR + worldY * cosR;
+
+                // Apply zoom and pan
+                const screenX = rotX * zoomLevel + width / 2 + panX;
+                const screenY = rotY * zoomLevel + height / 2 + panY;
+
+                return { x: screenX, y: screenY };
+            }
+
+            // Calculate distance from point to line segment
+            function pointToSegmentDistance(px, py, x1, y1, x2, y2) {
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const lengthSquared = dx * dx + dy * dy;
+
+                if (lengthSquared === 0) {
+                    // Segment is a point
+                    return Math.sqrt(
+                        (px - x1) * (px - x1) + (py - y1) * (py - y1),
+                    );
+                }
+
+                // Calculate projection parameter
+                let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+                t = Math.max(0, Math.min(1, t));
+
+                // Find closest point on segment
+                const closestX = x1 + t * dx;
+                const closestY = y1 + t * dy;
+
+                return Math.sqrt(
+                    (px - closestX) * (px - closestX) +
+                        (py - closestY) * (py - closestY),
+                );
+            }
+
+            // Check if a screen point is near a zone edge or wall
+            function findZoneAtPoint(screenX, screenY) {
+                if (!objects) return null;
+
+                const worldPos = screenToWorld(screenX, screenY);
+                const tolerance = EDGE_HIT_TOLERANCE / zoomLevel;
+
+                // Helper to check zone edges
+                function checkZoneEdges(zones, typeName) {
+                    if (!zones) return null;
+                    for (let i = 0; i < zones.length; i++) {
+                        const zone = zones[i];
+                        const coords = zone.area.coordinates[0];
+
+                        for (let j = 0; j < coords.length; j++) {
+                            const x1 = coords[j][0] - centerX;
+                            const y1 = coords[j][1] - centerY;
+                            const x2 =
+                                coords[(j + 1) % coords.length][0] - centerX;
+                            const y2 =
+                                coords[(j + 1) % coords.length][1] - centerY;
+
+                            const dist = pointToSegmentDistance(
+                                worldPos.x,
+                                worldPos.y,
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                            );
+                            if (dist < tolerance) {
+                                return { type: typeName, index: i };
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                // Check all zone types
+                let result = checkZoneEdges(
+                    objects.attenuatingZones,
+                    "attenuatingZone",
+                );
+                if (result) return result;
+
+                result = checkZoneEdges(objects.scopeZones, "scopeZone");
+                if (result) return result;
+
+                result = checkZoneEdges(
+                    objects.holeInFloorZones,
+                    "holeInFloorZone",
+                );
+                if (result) return result;
+
+                result = checkZoneEdges(objects.capacityZones, "capacityZone");
+                if (result) return result;
+
+                // Check walls
+                if (objects.walls && objects.wallEndpoints) {
+                    for (let i = 0; i < objects.walls.length; i++) {
+                        const wall = objects.walls[i];
+                        const startEndpoint = objects.wallEndpoints.find(
+                            (e) => e.id === wall.startId,
+                        );
+                        const endEndpoint = objects.wallEndpoints.find(
+                            (e) => e.id === wall.endId,
+                        );
+
+                        if (startEndpoint && endEndpoint) {
+                            const x1 = startEndpoint.x - centerX;
+                            const y1 = startEndpoint.y - centerY;
+                            const x2 = endEndpoint.x - centerX;
+                            const y2 = endEndpoint.y - centerY;
+
+                            const dist = pointToSegmentDistance(
+                                worldPos.x,
+                                worldPos.y,
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                            );
+                            if (dist < tolerance) {
+                                return { type: "wall", index: i };
+                            }
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            // Helper to get zone coordinates by type and index
+            function getZoneCoords(type, index) {
+                if (!objects) return null;
+                let zone = null;
+                switch (type) {
+                    case "attenuatingZone":
+                        zone = objects.attenuatingZones?.[index];
+                        break;
+                    case "scopeZone":
+                        zone = objects.scopeZones?.[index];
+                        break;
+                    case "holeInFloorZone":
+                        zone = objects.holeInFloorZones?.[index];
+                        break;
+                    case "capacityZone":
+                        zone = objects.capacityZones?.[index];
+                        break;
+                }
+                return zone ? zone.area.coordinates[0] : null;
+            }
+
+            // Get the connected segments for a point being dragged
+            // Returns array of { x, y } representing the "other end" of each connected segment
+            function getConnectedSegmentEndpoints(dragPoint) {
+                if (!objects || !dragPoint) return [];
+
+                const endpoints = [];
+
+                if (dragPoint.zoneType === "wall" && dragPoint.endpointId) {
+                    // For walls, find all walls that share this endpoint
+                    if (objects.walls && objects.wallEndpoints) {
+                        for (const wall of objects.walls) {
+                            let otherEndpointId = null;
+                            if (wall.startId === dragPoint.endpointId) {
+                                otherEndpointId = wall.endId;
+                            } else if (wall.endId === dragPoint.endpointId) {
+                                otherEndpointId = wall.startId;
+                            }
+                            if (otherEndpointId) {
+                                const otherEndpoint =
+                                    objects.wallEndpoints.find(
+                                        (e) => e.id === otherEndpointId,
+                                    );
+                                if (otherEndpoint) {
+                                    endpoints.push({
+                                        x: otherEndpoint.x,
+                                        y: otherEndpoint.y,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // For zones, get the adjacent points in the polygon
+                    const coords = getZoneCoords(
+                        dragPoint.zoneType,
+                        dragPoint.zoneIndex,
+                    );
+                    if (coords && dragPoint.pointIndex !== undefined) {
+                        const len = coords.length;
+                        const idx = dragPoint.pointIndex;
+                        // Previous point
+                        const prevIdx = (idx - 1 + len) % len;
+                        endpoints.push({
+                            x: coords[prevIdx][0],
+                            y: coords[prevIdx][1],
+                        });
+                        // Next point
+                        const nextIdx = (idx + 1) % len;
+                        endpoints.push({
+                            x: coords[nextIdx][0],
+                            y: coords[nextIdx][1],
+                        });
+                    }
+                }
+
+                return endpoints;
+            }
+
+            // Find the best position that satisfies multiple angle snap constraints simultaneously
+            // For example, a T-junction where 3 walls meet should snap to satisfy all 3 angles at once
+            function findBestMultiSnapPosition(newX, newY, dragPoint) {
+                const connectedEndpoints =
+                    getConnectedSegmentEndpoints(dragPoint);
+                if (connectedEndpoints.length === 0) return null;
+
+                const tolerance = ANGLE_SNAP_TOLERANCE;
+
+                // Collect all possible constraint lines from each connected endpoint
+                // Each constraint is a line defined by: pivot point + direction
+                const constraints = [];
+
+                for (const endpoint of connectedEndpoints) {
+                    const otherSegments = getOtherConnectedSegments(
+                        endpoint,
+                        dragPoint,
+                    );
+
+                    // For each reference segment at this endpoint, calculate the snap angles
+                    for (const ref of otherSegments) {
+                        const rdx = ref.x - endpoint.x;
+                        const rdy = ref.y - endpoint.y;
+                        const rlen = Math.sqrt(rdx * rdx + rdy * rdy);
+                        if (rlen < 0.001) continue;
+
+                        const refAngle = Math.atan2(rdy, rdx);
+
+                        // Colinear constraint (180° from reference)
+                        constraints.push({
+                            pivotX: endpoint.x,
+                            pivotY: endpoint.y,
+                            angle: refAngle + Math.PI,
+                            snapType: "colinear",
+                            refAngle: refAngle,
+                        });
+
+                        // Perpendicular constraints (90° from reference)
+                        constraints.push({
+                            pivotX: endpoint.x,
+                            pivotY: endpoint.y,
+                            angle: refAngle + Math.PI / 2,
+                            snapType: "perpendicular",
+                            refAngle: refAngle,
+                        });
+                        constraints.push({
+                            pivotX: endpoint.x,
+                            pivotY: endpoint.y,
+                            angle: refAngle - Math.PI / 2,
+                            snapType: "perpendicular",
+                            refAngle: refAngle,
+                        });
+                    }
+                }
+
+                // Also add constraints at the dragged point itself
+                // These check if segments from the dragged point to connected endpoints
+                // are colinear or perpendicular to each other
+                // We need at least 2 connected endpoints for this to make sense
+                if (connectedEndpoints.length >= 2) {
+                    for (let i = 0; i < connectedEndpoints.length; i++) {
+                        for (
+                            let j = i + 1;
+                            j < connectedEndpoints.length;
+                            j++
+                        ) {
+                            const ep1 = connectedEndpoints[i];
+                            const ep2 = connectedEndpoints[j];
+
+                            // Add constraint: segments to ep1 and ep2 should be colinear (180°)
+                            constraints.push({
+                                atDraggedPoint: true,
+                                snapType: "colinear",
+                                endpoint1: ep1,
+                                endpoint2: ep2,
+                            });
+
+                            // Add constraint: segments to ep1 and ep2 should be perpendicular (90°)
+                            constraints.push({
+                                atDraggedPoint: true,
+                                snapType: "perpendicular",
+                                endpoint1: ep1,
+                                endpoint2: ep2,
+                            });
+                        }
+                    }
+                }
+
+                if (constraints.length === 0) return null;
+
+                // Helper to check if a position satisfies a constraint
+                function satisfiesConstraint(x, y, constraint) {
+                    if (constraint.atDraggedPoint) {
+                        // For constraints at the dragged point, check if the angle between
+                        // segments to endpoint1 and endpoint2 matches the constraint type
+                        const ep1 = constraint.endpoint1;
+                        const ep2 = constraint.endpoint2;
+
+                        const dx1 = ep1.x - x;
+                        const dy1 = ep1.y - y;
+                        const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+
+                        const dx2 = ep2.x - x;
+                        const dy2 = ep2.y - y;
+                        const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+                        if (len1 < 0.001 || len2 < 0.001) return false;
+
+                        const angle1 = Math.atan2(dy1, dx1);
+                        const angle2 = Math.atan2(dy2, dx2);
+                        const angleBetween = Math.abs(
+                            normalizeAngle(angle1 - angle2),
+                        );
+
+                        if (constraint.snapType === "colinear") {
+                            // Segments should be 180° apart (straight line through dragged point)
+                            return Math.abs(angleBetween - Math.PI) < tolerance;
+                        } else if (constraint.snapType === "perpendicular") {
+                            // Segments should be 90° apart
+                            return (
+                                Math.abs(angleBetween - Math.PI / 2) < tolerance
+                            );
+                        }
+                        return false;
+                    }
+
+                    // For constraints at connected endpoints (not the dragged point)
+                    const dx = x - constraint.pivotX;
+                    const dy = y - constraint.pivotY;
+                    const len = Math.sqrt(dx * dx + dy * dy);
+                    if (len < 0.001) return true; // At the pivot, considered satisfied
+
+                    const actualAngle = Math.atan2(dy, dx);
+                    const diff = normalizeAngle(actualAngle - constraint.angle);
+                    return Math.abs(diff) < tolerance;
+                }
+
+                // Helper to get the constraint line (point + angle) for any constraint
+                // For constraints at connected endpoints: uses pivotX, pivotY, angle directly
+                // For colinear constraints at dragged point: line through endpoint1 and endpoint2
+                // For perpendicular constraints at dragged point: returns null (not a simple line)
+                function getConstraintLine(c) {
+                    if (c.atDraggedPoint) {
+                        if (c.snapType === "colinear") {
+                            // Line through endpoint1 and endpoint2
+                            const dx = c.endpoint2.x - c.endpoint1.x;
+                            const dy = c.endpoint2.y - c.endpoint1.y;
+                            const angle = Math.atan2(dy, dx);
+                            return {
+                                px: c.endpoint1.x,
+                                py: c.endpoint1.y,
+                                angle: angle,
+                            };
+                        }
+                        // Perpendicular constraint at dragged point is not a simple line
+                        return null;
+                    }
+                    return {
+                        px: c.pivotX,
+                        py: c.pivotY,
+                        angle: c.angle,
+                    };
+                }
+
+                // Helper to find intersection of two lines
+                // Line 1: point (p1x, p1y) with direction angle a1
+                // Line 2: point (p2x, p2y) with direction angle a2
+                function lineIntersection(p1x, p1y, a1, p2x, p2y, a2) {
+                    const d1x = Math.cos(a1);
+                    const d1y = Math.sin(a1);
+                    const d2x = Math.cos(a2);
+                    const d2y = Math.sin(a2);
+
+                    // Check if lines are parallel
+                    const cross = d1x * d2y - d1y * d2x;
+                    if (Math.abs(cross) < 0.0001) return null;
+
+                    // Solve for t: p1 + t*d1 = p2 + s*d2
+                    const t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / cross;
+
+                    return {
+                        x: p1x + t * d1x,
+                        y: p1y + t * d1y,
+                    };
+                }
+
+                // Try to find a position that satisfies multiple constraints
+                // Strategy: Try intersections of constraint pairs, check how many total constraints are satisfied
+
+                let bestPosition = null;
+                let bestSatisfiedCount = 0;
+                let bestActiveSnaps = [];
+
+                // First, check if the current position already satisfies any constraints
+                const satisfiedAtCurrent = constraints.filter((c) =>
+                    satisfiesConstraint(newX, newY, c),
+                );
+
+                if (satisfiedAtCurrent.length > 0) {
+                    // Project onto the first satisfied constraint to get a snapped position
+                    const c = satisfiedAtCurrent[0];
+                    const line = getConstraintLine(c);
+
+                    if (line) {
+                        const dx = newX - line.px;
+                        const dy = newY - line.py;
+                        const len = Math.sqrt(dx * dx + dy * dy);
+
+                        bestPosition = {
+                            x: line.px + len * Math.cos(line.angle),
+                            y: line.py + len * Math.sin(line.angle),
+                        };
+                        bestSatisfiedCount = satisfiedAtCurrent.length;
+                    } else {
+                        // For non-line constraints (perpendicular at dragged point),
+                        // just use current position if it satisfies
+                        bestPosition = { x: newX, y: newY };
+                        bestSatisfiedCount = satisfiedAtCurrent.length;
+                    }
+                }
+
+                // Try intersections of all constraint pairs
+                for (let i = 0; i < constraints.length; i++) {
+                    for (let j = i + 1; j < constraints.length; j++) {
+                        const c1 = constraints[i];
+                        const c2 = constraints[j];
+
+                        const line1 = getConstraintLine(c1);
+                        const line2 = getConstraintLine(c2);
+
+                        // Skip if either constraint doesn't have a line representation
+                        if (!line1 || !line2) continue;
+
+                        const intersection = lineIntersection(
+                            line1.px,
+                            line1.py,
+                            line1.angle,
+                            line2.px,
+                            line2.py,
+                            line2.angle,
+                        );
+
+                        if (!intersection) continue;
+
+                        // Check distance from current position - don't snap too far
+                        const snapDist = Math.sqrt(
+                            (intersection.x - newX) ** 2 +
+                                (intersection.y - newY) ** 2,
+                        );
+                        const maxSnapDist = (SNAP_TOLERANCE * 3) / zoomLevel;
+                        if (snapDist > maxSnapDist) continue;
+
+                        // Count how many constraints this intersection satisfies
+                        const satisfied = constraints.filter((c) =>
+                            satisfiesConstraint(
+                                intersection.x,
+                                intersection.y,
+                                c,
+                            ),
+                        );
+
+                        // Prefer positions that satisfy more constraints
+                        // If equal, prefer closer positions
+                        if (
+                            satisfied.length > bestSatisfiedCount ||
+                            (satisfied.length === bestSatisfiedCount &&
+                                bestPosition &&
+                                snapDist <
+                                    Math.sqrt(
+                                        (bestPosition.x - newX) ** 2 +
+                                            (bestPosition.y - newY) ** 2,
+                                    ))
+                        ) {
+                            bestPosition = intersection;
+                            bestSatisfiedCount = satisfied.length;
+                        }
+                    }
+                }
+
+                if (!bestPosition || bestSatisfiedCount === 0) return null;
+
+                // Build the activeSnaps array for the best position
+                for (const c of constraints) {
+                    if (
+                        satisfiesConstraint(bestPosition.x, bestPosition.y, c)
+                    ) {
+                        // For constraints at the dragged point, use the new position as snap point
+                        // and recalculate the direction based on actual segment directions
+                        let snapPoint, lineDir, otherDir;
+
+                        if (c.atDraggedPoint) {
+                            snapPoint = {
+                                x: bestPosition.x,
+                                y: bestPosition.y,
+                            };
+                            // Calculate directions to the two endpoints
+                            const ep1 = c.endpoint1;
+                            const ep2 = c.endpoint2;
+
+                            const dx1 = ep1.x - bestPosition.x;
+                            const dy1 = ep1.y - bestPosition.y;
+                            const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+
+                            const dx2 = ep2.x - bestPosition.x;
+                            const dy2 = ep2.y - bestPosition.y;
+                            const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+
+                            if (len1 > 0.001 && len2 > 0.001) {
+                                // For colinear, show line along one direction
+                                // For perpendicular, show L-shape with both directions
+                                lineDir = {
+                                    x: dx1 / len1,
+                                    y: dy1 / len1,
+                                };
+                                if (c.snapType === "perpendicular") {
+                                    otherDir = {
+                                        x: dx2 / len2,
+                                        y: dy2 / len2,
+                                    };
+                                }
+                            }
+                        } else {
+                            snapPoint = { x: c.pivotX, y: c.pivotY };
+                            lineDir = {
+                                x: Math.cos(c.angle),
+                                y: Math.sin(c.angle),
+                            };
+                            if (c.snapType === "perpendicular") {
+                                otherDir = {
+                                    x: Math.cos(c.refAngle),
+                                    y: Math.sin(c.refAngle),
+                                };
+                            }
+                        }
+
+                        if (snapPoint && lineDir) {
+                            const snapInfo = {
+                                type: c.snapType,
+                                lineDir: lineDir,
+                                snapPoint: snapPoint,
+                            };
+                            if (otherDir) {
+                                snapInfo.otherDir = otherDir;
+                            }
+                            bestActiveSnaps.push(snapInfo);
+                        }
+                    }
+                }
+
+                // Deduplicate: show only one indicator per pivot point, prioritized by type
+                // Priority: colinear > perpendicular
+                const snapsByPivot = new Map();
+                for (const snap of bestActiveSnaps) {
+                    const key = `${snap.snapPoint.x.toFixed(6)},${snap.snapPoint.y.toFixed(6)}`;
+                    const existing = snapsByPivot.get(key);
+                    if (!existing) {
+                        snapsByPivot.set(key, snap);
+                    } else {
+                        // colinear has higher priority than perpendicular
+                        if (
+                            snap.type === "colinear" &&
+                            existing.type === "perpendicular"
+                        ) {
+                            snapsByPivot.set(key, snap);
+                        }
+                    }
+                }
+                bestActiveSnaps = Array.from(snapsByPivot.values());
+
+                return {
+                    x: bestPosition.x,
+                    y: bestPosition.y,
+                    activeSnaps: bestActiveSnaps,
+                };
+            }
+
+            // Collect all angle snaps - checks for colinear and perpendicular constraints at all joints
+            // Returns array of { snappedX, snappedY, snapType, lineDir, otherDir, snapPoint }
+            function collectAllAngleSnaps(newX, newY, dragPoint) {
+                const connectedEndpoints =
+                    getConnectedSegmentEndpoints(dragPoint);
+                if (connectedEndpoints.length === 0) return [];
+
+                const tolerance = ANGLE_SNAP_TOLERANCE;
+                const snaps = [];
+
+                // Helper function to collect angle snaps at a given pivot point
+                function collectAngleSnapsAtPivot(
+                    pivotX,
+                    pivotY,
+                    targetX,
+                    targetY,
+                    referenceSegments,
+                ) {
+                    const results = [];
+                    // Vector from pivot to target (the segment we're checking)
+                    const dx = targetX - pivotX;
+                    const dy = targetY - pivotY;
+                    const len = Math.sqrt(dx * dx + dy * dy);
+                    if (len < 0.001) return results;
+
+                    const currentAngle = Math.atan2(dy, dx);
+
+                    for (const ref of referenceSegments) {
+                        const rdx = ref.x - pivotX;
+                        const rdy = ref.y - pivotY;
+                        const rlen = Math.sqrt(rdx * rdx + rdy * rdy);
+                        if (rlen < 0.001) continue;
+
+                        const refAngle = Math.atan2(rdy, rdx);
+
+                        // Check for colinear (180° difference)
+                        const straightAngle = refAngle + Math.PI;
+                        const straightDiff = normalizeAngle(
+                            currentAngle - straightAngle,
+                        );
+                        if (Math.abs(straightDiff) < tolerance) {
+                            results.push({
+                                snappedX:
+                                    pivotX + len * Math.cos(straightAngle),
+                                snappedY:
+                                    pivotY + len * Math.sin(straightAngle),
+                                snapType: "colinear",
+                                lineDir: {
+                                    x: Math.cos(straightAngle),
+                                    y: Math.sin(straightAngle),
+                                },
+                                snapPoint: { x: pivotX, y: pivotY },
+                            });
+                        }
+
+                        // Check for perpendicular (90° angles)
+                        const rightAngle1 = refAngle + Math.PI / 2;
+                        const rightAngle2 = refAngle - Math.PI / 2;
+
+                        if (
+                            Math.abs(
+                                normalizeAngle(currentAngle - rightAngle1),
+                            ) < tolerance
+                        ) {
+                            results.push({
+                                snappedX: pivotX + len * Math.cos(rightAngle1),
+                                snappedY: pivotY + len * Math.sin(rightAngle1),
+                                snapType: "perpendicular",
+                                lineDir: {
+                                    x: Math.cos(rightAngle1),
+                                    y: Math.sin(rightAngle1),
+                                },
+                                otherDir: {
+                                    x: Math.cos(refAngle),
+                                    y: Math.sin(refAngle),
+                                },
+                                snapPoint: { x: pivotX, y: pivotY },
+                            });
+                        }
+                        if (
+                            Math.abs(
+                                normalizeAngle(currentAngle - rightAngle2),
+                            ) < tolerance
+                        ) {
+                            results.push({
+                                snappedX: pivotX + len * Math.cos(rightAngle2),
+                                snappedY: pivotY + len * Math.sin(rightAngle2),
+                                snapType: "perpendicular",
+                                lineDir: {
+                                    x: Math.cos(rightAngle2),
+                                    y: Math.sin(rightAngle2),
+                                },
+                                otherDir: {
+                                    x: Math.cos(refAngle),
+                                    y: Math.sin(refAngle),
+                                },
+                                snapPoint: { x: pivotX, y: pivotY },
+                            });
+                        }
+                    }
+                    return results;
+                }
+
+                // Check 1: Angle snap at the far end of connected segments
+                // (where the dragged point's segments connect to other segments)
+                for (const endpoint of connectedEndpoints) {
+                    const otherSegments = getOtherConnectedSegments(
+                        endpoint,
+                        dragPoint,
+                    );
+                    const results = collectAngleSnapsAtPivot(
+                        endpoint.x,
+                        endpoint.y,
+                        newX,
+                        newY,
+                        otherSegments,
+                    );
+                    snaps.push(...results);
+                }
+
+                return snaps;
+            }
+
+            // Normalize angle to [-π, π]
+            function normalizeAngle(angle) {
+                while (angle > Math.PI) angle -= 2 * Math.PI;
+                while (angle < -Math.PI) angle += 2 * Math.PI;
+                return angle;
+            }
+
+            // Get segments connected to a point, excluding the dragged segment
+            function getOtherConnectedSegments(endpoint, dragPoint) {
+                const segments = [];
+                if (!objects) return segments;
+
+                // For walls, find other walls sharing this endpoint
+                if (objects.walls && objects.wallEndpoints) {
+                    for (const wall of objects.walls) {
+                        let otherEndpointId = null;
+                        if (
+                            wall.startId === findEndpointIdAtPosition(endpoint)
+                        ) {
+                            otherEndpointId = wall.endId;
+                        } else if (
+                            wall.endId === findEndpointIdAtPosition(endpoint)
+                        ) {
+                            otherEndpointId = wall.startId;
+                        }
+                        if (
+                            otherEndpointId &&
+                            otherEndpointId !== dragPoint.endpointId
+                        ) {
+                            const otherEndpoint = objects.wallEndpoints.find(
+                                (e) => e.id === otherEndpointId,
+                            );
+                            if (otherEndpoint) {
+                                segments.push({
+                                    x: otherEndpoint.x,
+                                    y: otherEndpoint.y,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // For zones, check if this endpoint matches any zone vertices
+                const zoneTypes = [
+                    { arr: objects.attenuatingZones, name: "attenuatingZone" },
+                    { arr: objects.scopeZones, name: "scopeZone" },
+                    { arr: objects.holeInFloorZones, name: "holeInFloorZone" },
+                    { arr: objects.capacityZones, name: "capacityZone" },
+                ];
+
+                for (const { arr, name } of zoneTypes) {
+                    if (!arr) continue;
+                    for (let i = 0; i < arr.length; i++) {
+                        const coords = arr[i].area.coordinates[0];
+                        for (let j = 0; j < coords.length; j++) {
+                            if (
+                                Math.abs(coords[j][0] - endpoint.x) < 0.0001 &&
+                                Math.abs(coords[j][1] - endpoint.y) < 0.0001
+                            ) {
+                                // This is a matching vertex, get adjacent points
+                                // but exclude the one we're dragging
+                                const len = coords.length;
+                                const prevIdx = (j - 1 + len) % len;
+                                const nextIdx = (j + 1) % len;
+
+                                // Check if prev/next is the dragged point
+                                const isDraggedPrev =
+                                    dragPoint.zoneType === name &&
+                                    dragPoint.zoneIndex === i &&
+                                    dragPoint.pointIndex === prevIdx;
+                                const isDraggedNext =
+                                    dragPoint.zoneType === name &&
+                                    dragPoint.zoneIndex === i &&
+                                    dragPoint.pointIndex === nextIdx;
+
+                                if (!isDraggedPrev) {
+                                    segments.push({
+                                        x: coords[prevIdx][0],
+                                        y: coords[prevIdx][1],
+                                    });
+                                }
+                                if (!isDraggedNext) {
+                                    segments.push({
+                                        x: coords[nextIdx][0],
+                                        y: coords[nextIdx][1],
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return segments;
+            }
+
+            // Find endpoint ID at a given position
+            function findEndpointIdAtPosition(pos) {
+                if (!objects || !objects.wallEndpoints) return null;
+                for (const endpoint of objects.wallEndpoints) {
+                    if (
+                        Math.abs(endpoint.x - pos.x) < 0.0001 &&
+                        Math.abs(endpoint.y - pos.y) < 0.0001
+                    ) {
+                        return endpoint.id;
+                    }
+                }
+                return null;
+            }
+
+            // Find the nearest point across all objects to a given world position
+            // Returns { x, y, distance } or null if no points found
+            // excludePoint can be { zoneType, zoneIndex, pointIndex } or { zoneType, zoneIndex, endpointId } to exclude
+            function findNearestPoint(worldX, worldY, excludePoint = null) {
+                if (!objects) return null;
+
+                let nearest = null;
+                let minDist = Infinity;
+
+                // Helper to check if a point should be excluded
+                function isExcluded(type, index, pointIdx, endpointId = null) {
+                    if (!excludePoint) return false;
+
+                    // For wall endpoints, check endpointId directly (walls can share endpoints)
+                    if (
+                        type === "wall" &&
+                        endpointId &&
+                        excludePoint.endpointId === endpointId
+                    ) {
+                        return true;
+                    }
+
+                    // For zones, check type, index, and point index
+                    if (excludePoint.zoneType !== type) return false;
+                    if (excludePoint.zoneIndex !== index) return false;
+                    if (
+                        pointIdx !== undefined &&
+                        excludePoint.pointIndex === pointIdx
+                    )
+                        return true;
+                    return false;
+                }
+
+                // Helper to check a point
+                function checkPoint(
+                    x,
+                    y,
+                    type,
+                    index,
+                    pointIdx,
+                    endpointId = null,
+                ) {
+                    if (isExcluded(type, index, pointIdx, endpointId)) return;
+                    const dx = x - worldX;
+                    const dy = y - worldY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = { x, y, distance: dist };
+                    }
+                }
+
+                // Check all zone types
+                const zoneTypes = [
+                    { arr: objects.attenuatingZones, name: "attenuatingZone" },
+                    { arr: objects.scopeZones, name: "scopeZone" },
+                    { arr: objects.holeInFloorZones, name: "holeInFloorZone" },
+                    { arr: objects.capacityZones, name: "capacityZone" },
+                ];
+
+                for (const { arr, name } of zoneTypes) {
+                    if (!arr) continue;
+                    for (let i = 0; i < arr.length; i++) {
+                        const coords = arr[i].area.coordinates[0];
+                        for (let j = 0; j < coords.length; j++) {
+                            checkPoint(coords[j][0], coords[j][1], name, i, j);
+                        }
+                    }
+                }
+
+                // Check wall endpoints
+                if (objects.wallEndpoints) {
+                    for (const endpoint of objects.wallEndpoints) {
+                        // Find which wall this endpoint belongs to for exclusion check
+                        let wallIndex = -1;
+                        if (objects.walls) {
+                            wallIndex = objects.walls.findIndex(
+                                (w) =>
+                                    w.startId === endpoint.id ||
+                                    w.endId === endpoint.id,
+                            );
+                        }
+                        checkPoint(
+                            endpoint.x,
+                            endpoint.y,
+                            "wall",
+                            wallIndex,
+                            undefined,
+                            endpoint.id,
+                        );
+                    }
+                }
+
+                return nearest;
+            }
+
+            // Get wall endpoints for a selected wall (returns array of {endpointId, x, y})
+            function getWallEndpointHandles(wallIndex) {
+                if (!objects || !objects.walls || !objects.wallEndpoints)
+                    return [];
+                const wall = objects.walls[wallIndex];
+                if (!wall) return [];
+
+                const handles = [];
+                const startEndpoint = objects.wallEndpoints.find(
+                    (e) => e.id === wall.startId,
+                );
+                const endEndpoint = objects.wallEndpoints.find(
+                    (e) => e.id === wall.endId,
+                );
+
+                if (startEndpoint) {
+                    handles.push({
+                        endpointId: startEndpoint.id,
+                        x: startEndpoint.x,
+                        y: startEndpoint.y,
+                    });
+                }
+                if (endEndpoint) {
+                    handles.push({
+                        endpointId: endEndpoint.id,
+                        x: endEndpoint.x,
+                        y: endEndpoint.y,
+                    });
+                }
+                return handles;
+            }
+
+            // Check if a screen point is near a point handle of the selected zone/wall
+            function findPointHandleAtPoint(screenX, screenY) {
+                if (!selectedZone || !objects) return null;
+
+                // Handle walls specially - they use endpoints
+                if (selectedZone.type === "wall") {
+                    const handles = getWallEndpointHandles(selectedZone.index);
+                    for (let i = 0; i < handles.length; i++) {
+                        const worldX = handles[i].x - centerX;
+                        const worldY = handles[i].y - centerY;
+                        const screenPos = worldToScreen(worldX, worldY);
+
+                        const dx = screenX - screenPos.x;
+                        const dy = screenY - screenPos.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < POINT_HANDLE_RADIUS + 4) {
+                            return {
+                                zoneType: "wall",
+                                zoneIndex: selectedZone.index,
+                                endpointId: handles[i].endpointId,
+                            };
+                        }
+                    }
+                    return null;
+                }
+
+                // Handle zone types
+                const coords = getZoneCoords(
+                    selectedZone.type,
+                    selectedZone.index,
+                );
+                if (!coords) return null;
+
+                for (let i = 0; i < coords.length; i++) {
+                    const worldX = coords[i][0] - centerX;
+                    const worldY = coords[i][1] - centerY;
+                    const screenPos = worldToScreen(worldX, worldY);
+
+                    const dx = screenX - screenPos.x;
+                    const dy = screenY - screenPos.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < POINT_HANDLE_RADIUS + 4) {
+                        return {
+                            zoneType: selectedZone.type,
+                            zoneIndex: selectedZone.index,
+                            pointIndex: i,
+                        };
+                    }
+                }
+
+                return null;
+            }
+
+            // Draw point handles for the selected zone or wall
+            function drawSelectedZoneHandles() {
+                if (!selectedZone || !objects) return;
+
+                // We need to draw in screen space so handles don't scale with zoom
+                push();
+                resetMatrix();
+
+                // Handle walls - draw handles at endpoints
+                if (selectedZone.type === "wall") {
+                    const handles = getWallEndpointHandles(selectedZone.index);
+                    for (const handle of handles) {
+                        const worldX = handle.x - centerX;
+                        const worldY = handle.y - centerY;
+                        const screenPos = worldToScreen(worldX, worldY);
+
+                        fill(255);
+                        stroke(0);
+                        strokeWeight(2);
+                        ellipse(
+                            screenPos.x,
+                            screenPos.y,
+                            POINT_HANDLE_RADIUS * 2,
+                            POINT_HANDLE_RADIUS * 2,
+                        );
+                    }
+                    pop();
+                    return;
+                }
+
+                // Handle zone types
+                const coords = getZoneCoords(
+                    selectedZone.type,
+                    selectedZone.index,
+                );
+                if (!coords) {
+                    pop();
+                    return;
+                }
+
+                for (let i = 0; i < coords.length; i++) {
+                    const worldX = coords[i][0] - centerX;
+                    const worldY = coords[i][1] - centerY;
+                    const screenPos = worldToScreen(worldX, worldY);
+
+                    fill(255);
+                    stroke(0);
+                    strokeWeight(2);
+                    ellipse(
+                        screenPos.x,
+                        screenPos.y,
+                        POINT_HANDLE_RADIUS * 2,
+                        POINT_HANDLE_RADIUS * 2,
+                    );
+                }
+
+                pop();
+            }
+
+            // Draw hovered point indicator or snap target
+            function drawHoveredPoint() {
+                // Show snap target when dragging to a point, otherwise show hovered point
+                const pointToDraw = isDraggingPoint
+                    ? snapTargetPoint
+                    : hoveredPoint;
+
+                // Draw all active angle/line snap indicators
+                if (isDraggingPoint && activeSnaps.length > 0) {
+                    drawAllSnapIndicators();
+                }
+
+                if (!pointToDraw) return;
+
+                // Don't show hovered point if we have a selected zone with handles
+                if (!isDraggingPoint && selectedZone) return;
+
+                const worldX = pointToDraw.x - centerX;
+                const worldY = pointToDraw.y - centerY;
+                const screenPos = worldToScreen(worldX, worldY);
+
+                push();
+                resetMatrix();
+
+                fill(255);
+                stroke("#9A999C");
+                strokeWeight(2);
+                ellipse(
+                    screenPos.x,
+                    screenPos.y,
+                    POINT_HANDLE_RADIUS * 2,
+                    POINT_HANDLE_RADIUS * 2,
+                );
+
+                // Draw red dashed circle indicator when snapping to a point
+                if (isDraggingPoint && snapTargetPoint) {
+                    noFill();
+                    stroke("#FF0000");
+                    strokeWeight(2);
+                    drawingContext.setLineDash([4, 3]); // Dashed line pattern
+                    const indicatorRadius = POINT_HANDLE_RADIUS + 4; // 2px gap from point edge
+                    ellipse(
+                        screenPos.x,
+                        screenPos.y,
+                        indicatorRadius * 2,
+                        indicatorRadius * 2,
+                    );
+                    drawingContext.setLineDash([]); // Reset to solid
+                }
+
+                pop();
+            }
+
+            // Draw snap indicator lines (red dashed) for colinear and perpendicular constraints
+            function drawAllSnapIndicators() {
+                if (activeSnaps.length === 0) return;
+
+                push();
+                resetMatrix();
+
+                stroke("#FF0000");
+                strokeWeight(2);
+                strokeCap(ROUND);
+                drawingContext.setLineDash([4, 3]); // Dashed line pattern
+
+                const len = SNAP_INDICATOR_LENGTH;
+
+                for (const snap of activeSnaps) {
+                    if (!snap.snapPoint) continue;
+
+                    const snapWorldX = snap.snapPoint.x - centerX;
+                    const snapWorldY = snap.snapPoint.y - centerY;
+                    const screenPos = worldToScreen(snapWorldX, snapWorldY);
+
+                    if (snap.type === "colinear") {
+                        // Draw a short red line along the snap direction
+                        const dir = snap.lineDir;
+                        line(
+                            screenPos.x - dir.x * len,
+                            screenPos.y - dir.y * len,
+                            screenPos.x + dir.x * len,
+                            screenPos.y + dir.y * len,
+                        );
+                    } else if (snap.type === "perpendicular") {
+                        // Draw an "L" shape for perpendicular constraint
+                        const dir1 = snap.lineDir;
+                        const dir2 = snap.otherDir;
+
+                        // Line along the new segment direction
+                        line(
+                            screenPos.x,
+                            screenPos.y,
+                            screenPos.x + dir1.x * len,
+                            screenPos.y + dir1.y * len,
+                        );
+
+                        // Line along the other segment direction
+                        line(
+                            screenPos.x,
+                            screenPos.y,
+                            screenPos.x + dir2.x * len,
+                            screenPos.y + dir2.y * len,
+                        );
+                    }
+                }
+
+                pop();
             }
 
             // Prevent spacebar from activating focused buttons
