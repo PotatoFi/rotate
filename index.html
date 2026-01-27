@@ -3,12 +3,6 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta
-            http-equiv="Cache-Control"
-            content="no-cache, no-store, must-revalidate"
-        />
-        <meta http-equiv="Pragma" content="no-cache" />
-        <meta http-equiv="Expires" content="0" />
         <title>Hamina Clipboard Tools</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
         <link
@@ -152,7 +146,6 @@
             .type-options {
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
             }
 
             .type-option {
@@ -176,7 +169,7 @@
             }
 
             h3 {
-                margin: 0;
+                margin: 0px 0px 8px 0px;
                 font-size: 14px;
                 color: var(--header);
                 font-weight: 700;
@@ -352,6 +345,66 @@
                 font-size: 16px;
             }
 
+            /* Context menu */
+            .context-menu {
+                position: fixed;
+                background-color: var(--panel-bg);
+                border-radius: 6px;
+                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                min-width: 180px;
+                padding: 4px;
+                display: none;
+            }
+
+            .context-menu.visible {
+                display: block;
+            }
+
+            .context-menu-item {
+                padding: 8px;
+                cursor: pointer;
+                font-size: 14px;
+                color: var(--text);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                transition: background-color 0.1s;
+                border-radius: 6px;
+            }
+
+            .context-menu-item:hover {
+                background-color: var(--foreground);
+            }
+
+            .context-menu-item i {
+                font-size: 16px;
+                width: 20px;
+                text-align: center;
+            }
+
+            .context-menu-item.danger {
+                color: #ef4444;
+            }
+
+            .context-menu-item.danger:hover {
+                background-color: #fef2f2;
+            }
+
+            .context-menu-divider {
+                height: 1px;
+                background-color: var(--foreground);
+                margin: 4px 0;
+            }
+
+            /* Color picker input (hidden, triggered programmatically) */
+            .hidden-color-picker {
+                position: absolute;
+                visibility: hidden;
+                width: 0;
+                height: 0;
+            }
+
             /* Floating input panel - top center */
             .input-panel {
                 position: fixed;
@@ -378,10 +431,12 @@
     <body>
         <div id="canvas"></div>
 
-        <!-- Toast container -->
         <div class="toast-container" id="toastContainer"></div>
 
-        <!-- Floating input panel - top center -->
+        <div class="context-menu" id="contextMenu"></div>
+
+        <input type="color" class="hidden-color-picker" id="colorPicker" />
+
         <div class="input-panel">
             <button class="toolbar-button green" onclick="pasteFromClipboard()">
                 <i class="bx bx-paste"></i> Paste from Hamina
@@ -395,7 +450,6 @@
             </button>
         </div>
 
-        <!-- Left tool menu -->
         <div class="tool-menu">
             <button
                 class="tool-button"
@@ -448,6 +502,7 @@
         <!-- Right panel - Rotate tool options -->
         <div id="rotateToolbar" class="toolbar">
             <h3>Rotate Objects</h3>
+            <p class="toolbar-description">Rotate everything on the canvas.</p>
             <div class="rotation-grid">
                 <button
                     class="toolbar-button rotation-button blue"
@@ -503,7 +558,9 @@
         <!-- Right panel - Change Type tool options -->
         <div id="changeTypeToolbar" class="toolbar">
             <h3>Convert Zones and Objects</h3>
-            <p class="toolbar-description">Convert all zones and objects to:</p>
+            <p class="toolbar-description">
+                Convert all zones and objects on the canvas to:
+            </p>
             <div class="type-options">
                 <label class="type-option">
                     <input
@@ -547,7 +604,9 @@
         <!-- Right panel - Generate Circle tool options -->
         <div id="generateCircleToolbar" class="toolbar">
             <h3>Generate Circle</h3>
-            <p class="toolbar-description">Create a circular shape:</p>
+            <p class="toolbar-description">
+                Replace everything on the canvas with a circular:
+            </p>
             <div class="type-options">
                 <label class="type-option">
                     <input
@@ -597,7 +656,9 @@
         <!-- Right panel - Generate Grid tool options -->
         <div id="generateGridToolbar" class="toolbar">
             <h3>Generate Grid</h3>
-            <p class="toolbar-description">Create a grid of APs or notes:</p>
+            <p class="toolbar-description">
+                Replace everything on the canvas with a grid of:
+            </p>
             <div class="type-options">
                 <label class="type-option">
                     <input
@@ -702,34 +763,46 @@
             let activeSnaps = []; // Array of { type, snapPoint, lineDir, otherDir } - all active snap indicators
             let draggedPoint = null; // { zoneType: string, zoneIndex: number, pointIndex: number }
             let isDraggingPoint = false;
-            let pointOfInterest = null; // { x, y } in world coords - point for X/Y axis snapping
-            let previousHoveredPoint = null; // { x, y } - the point hovered before current one
-            let axisSnap = null; // { axis: 'x' | 'y' | 'both', poiX, poiY } - active axis snap info
             const POINT_HANDLE_RADIUS = 6; // Radius of point handles in screen pixels
             const EDGE_HIT_TOLERANCE = 8; // Distance tolerance for clicking on edges
             const POINT_HOVER_TOLERANCE = 12; // Distance tolerance for hovering near points
             const SNAP_TOLERANCE = 15; // Distance tolerance for snapping to points
             const ANGLE_SNAP_TOLERANCE = 0.05; // Radians tolerance for angle snapping (~3 degrees)
             const SNAP_INDICATOR_LENGTH = 15; // Length of snap indicator lines in screen pixels
-            const AXIS_SNAP_TOLERANCE = 10; // Distance tolerance for X/Y axis snapping to POI
+
+            // Context menu state
+            let contextMenuTarget = null; // { type: 'wall'|'zone'|'accessPoint'|'mapNote', index: number, zoneType?: string }
+            let contextMenuClickPos = { x: 0, y: 0 }; // World position where context menu was opened
+            let isMovingObject = false; // True when in "move" mode after clicking Move in context menu
+            let moveTarget = null; // The object being moved
+            let moveOffset = { x: 0, y: 0 }; // Offset from mouse to object anchor point (in world coords)
+            let isDraggingObject = false; // True when click-dragging an object directly
 
             // AP icon images
             let apIconBase;
             let apIconMask;
-            const apIconHotspot = { x: 32, y: 80 };
+            let apIconMaskSelected;
+            const apIconHotspot = { x: 32, y: 32 }; // Center of image
             const apIconScale = 0.5; // Scale factor for AP icons (adjust as needed)
 
             // Map note icon images
             let mapNoteIconBase;
             let mapNoteIconMask;
-            const mapNoteIconHotspot = { x: 0, y: 64 }; // Bottom left corner of image
+            let mapNoteIconMaskSelected;
+            const mapNoteIconHotspot = { x: 32, y: 32 }; // Center of image
             const mapNoteIconScale = 0.5; // Scale factor for map note icons
 
             function preload() {
                 apIconBase = loadImage("images/ap-icon-base.png");
                 apIconMask = loadImage("images/ap-icon-mask.png");
+                apIconMaskSelected = loadImage(
+                    "images/ap-icon-mask-selected.png",
+                );
                 mapNoteIconBase = loadImage("images/map-note-base.png");
                 mapNoteIconMask = loadImage("images/map-note-mask.png");
+                mapNoteIconMaskSelected = loadImage(
+                    "images/map-note-mask-selected.png",
+                );
             }
 
             // ========================================
@@ -1665,6 +1738,16 @@
                 // Draw attenuating zones
                 if (objects && objects.attenuatingZones) {
                     for (let i = 0; i < objects.attenuatingZones.length; i++) {
+                        // Skip if this zone is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "zone" &&
+                            moveTarget.zoneType === "attenuatingZone" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
                         const zone = objects.attenuatingZones[i];
                         const type = objects.attenuatingZoneTypes?.find(
                             (t) => t.id === zone.typeId,
@@ -1687,6 +1770,16 @@
                 // Draw scope zones
                 if (objects && objects.scopeZones) {
                     for (let i = 0; i < objects.scopeZones.length; i++) {
+                        // Skip if this zone is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "zone" &&
+                            moveTarget.zoneType === "scopeZone" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
                         const zone = objects.scopeZones[i];
                         const isSelected =
                             selectedZone &&
@@ -1704,6 +1797,16 @@
                 // Draw hole in floor zones (INCLUDE = floor hole, EXCLUDE = building edge)
                 if (objects && objects.holeInFloorZones) {
                     for (let i = 0; i < objects.holeInFloorZones.length; i++) {
+                        // Skip if this zone is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "zone" &&
+                            moveTarget.zoneType === "holeInFloorZone" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
                         const zone = objects.holeInFloorZones[i];
                         const isSelected =
                             selectedZone &&
@@ -1732,6 +1835,16 @@
                 // Draw capacity zones
                 if (objects && objects.capacityZones) {
                     for (let i = 0; i < objects.capacityZones.length; i++) {
+                        // Skip if this zone is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "zone" &&
+                            moveTarget.zoneType === "capacityZone" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
                         const zone = objects.capacityZones[i];
                         const isSelected =
                             selectedZone &&
@@ -1748,33 +1861,70 @@
 
                 // Draw access points
                 if (objects && objects.accessPoints) {
-                    for (let ap of objects.accessPoints) {
+                    for (let i = 0; i < objects.accessPoints.length; i++) {
+                        // Skip if this AP is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "accessPoint" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
+                        const ap = objects.accessPoints[i];
                         const apColor = ap.color || "#4687f0";
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "accessPoint" &&
+                            selectedZone.index === i;
                         drawAccessPoint(
                             ap.x - centerX,
                             ap.y - centerY,
                             apColor,
+                            isSelected,
                         );
                     }
                 }
 
                 // Draw map notes
                 if (objects && objects.mapNotes) {
-                    for (let note of objects.mapNotes) {
+                    for (let i = 0; i < objects.mapNotes.length; i++) {
+                        // Skip if this map note is being moved
+                        if (
+                            (isMovingObject || isDraggingObject) &&
+                            moveTarget &&
+                            moveTarget.type === "mapNote" &&
+                            moveTarget.index === i
+                        ) {
+                            continue;
+                        }
+                        const note = objects.mapNotes[i];
                         const noteColor = note.color || "#db6921";
+                        const isSelected =
+                            selectedZone &&
+                            selectedZone.type === "mapNote" &&
+                            selectedZone.index === i;
                         drawMapNote(
                             note.x - centerX,
                             note.y - centerY,
                             noteColor,
+                            isSelected,
                         );
                     }
                 }
 
-                // Draw selection handles (after everything else)
-                drawSelectedZoneHandles();
+                // Draw selection handles (after everything else) - but not while moving/dragging
+                if (!isMovingObject && !isDraggingObject) {
+                    drawSelectedZoneHandles();
+                }
 
                 // Draw hovered point indicator (or snap target when dragging)
                 drawHoveredPoint();
+
+                // Draw move preview if in move mode or dragging
+                if ((isMovingObject || isDraggingObject) && moveTarget) {
+                    drawMovePreview();
+                }
             }
 
             function darkenColor(hexColor, factor) {
@@ -1825,7 +1975,7 @@
                 }
             }
 
-            function drawAccessPoint(x, y, apColor) {
+            function drawAccessPoint(x, y, apColor, isSelected = false) {
                 // Save current transformation state
                 push();
 
@@ -1840,7 +1990,7 @@
                 const drawWidth = apIconBase.width * iconScale;
                 const drawHeight = apIconBase.height * iconScale;
 
-                // Offset by hotspot so icon is anchored at bottom center
+                // Offset by hotspot so icon is anchored at center
                 const drawX = -apIconHotspot.x * iconScale;
                 const drawY = -apIconHotspot.y * iconScale;
 
@@ -1848,16 +1998,26 @@
                 noTint();
                 image(apIconBase, drawX, drawY, drawWidth, drawHeight);
 
-                // Draw color mask with tint
+                // Draw color mask with tint (use selected mask if selected)
                 tint(apColor);
-                image(apIconMask, drawX, drawY, drawWidth, drawHeight);
+                if (isSelected) {
+                    image(
+                        apIconMaskSelected,
+                        drawX,
+                        drawY,
+                        drawWidth,
+                        drawHeight,
+                    );
+                } else {
+                    image(apIconMask, drawX, drawY, drawWidth, drawHeight);
+                }
                 noTint();
 
                 // Restore transformation state
                 pop();
             }
 
-            function drawMapNote(x, y, noteColor) {
+            function drawMapNote(x, y, noteColor, isSelected = false) {
                 // Save current transformation state
                 push();
 
@@ -1872,7 +2032,7 @@
                 const drawWidth = mapNoteIconBase.width * iconScale;
                 const drawHeight = mapNoteIconBase.height * iconScale;
 
-                // Offset by hotspot so icon is anchored at bottom left
+                // Offset by hotspot so icon is anchored at center
                 const drawX = -mapNoteIconHotspot.x * iconScale;
                 const drawY = -mapNoteIconHotspot.y * iconScale;
 
@@ -1880,9 +2040,19 @@
                 noTint();
                 image(mapNoteIconBase, drawX, drawY, drawWidth, drawHeight);
 
-                // Draw color mask with tint
+                // Draw color mask with tint (use selected mask if selected)
                 tint(noteColor);
-                image(mapNoteIconMask, drawX, drawY, drawWidth, drawHeight);
+                if (isSelected) {
+                    image(
+                        mapNoteIconMaskSelected,
+                        drawX,
+                        drawY,
+                        drawWidth,
+                        drawHeight,
+                    );
+                } else {
+                    image(mapNoteIconMask, drawX, drawY, drawWidth, drawHeight);
+                }
                 noTint();
 
                 // Restore transformation state
@@ -2043,6 +2213,23 @@
             let zoomAnchorScreenY = 0;
 
             function mousePressed() {
+                // Check if click is inside context menu - if so, let the menu handle it
+                const menu = document.getElementById("contextMenu");
+                if (menu && menu.classList.contains("visible")) {
+                    const menuRect = menu.getBoundingClientRect();
+                    if (
+                        mouseX >= menuRect.left &&
+                        mouseX <= menuRect.right &&
+                        mouseY >= menuRect.top &&
+                        mouseY <= menuRect.bottom
+                    ) {
+                        // Click is inside menu, don't process here
+                        return;
+                    }
+                    // Click is outside menu, hide it
+                    hideContextMenu();
+                }
+
                 if (shiftDown) {
                     isZooming = true;
                     zoomStartY = mouseY;
@@ -2052,50 +2239,87 @@
                     // Store the screen position where zoom started
                     zoomAnchorScreenX = mouseX;
                     zoomAnchorScreenY = mouseY;
-                } else if (mouseButton === RIGHT || mouseButton === CENTER) {
+                } else if (mouseButton === RIGHT) {
+                    // Right-click: show context menu if clicking on an object
+                    const target = findObjectAtPoint(mouseX, mouseY);
+                    if (target) {
+                        showContextMenu(mouseX, mouseY, target);
+                    }
+                    // Note: we no longer pan on right-click, only on middle-click
+                } else if (mouseButton === CENTER) {
+                    // Middle-click: pan
                     isPanning = true;
                     lastMouseX = mouseX;
                     lastMouseY = mouseY;
                     document.body.style.cursor = "grabbing";
                 } else if (mouseButton === LEFT && !spacebarDown) {
+                    // If in move mode, complete the move
+                    if (isMovingObject) {
+                        completeMove(mouseX, mouseY);
+                        return;
+                    }
+
                     // Check if clicking on a point handle of selected zone
                     const pointHandle = findPointHandleAtPoint(mouseX, mouseY);
                     if (pointHandle) {
                         isDraggingPoint = true;
                         draggedPoint = pointHandle;
-
-                        // If current POI is the point we're about to drag, use previous instead
-                        const draggedPos = getPointPosition(pointHandle);
-                        if (
-                            pointOfInterest &&
-                            draggedPos &&
-                            Math.abs(pointOfInterest.x - draggedPos.x) <
-                                0.0001 &&
-                            Math.abs(pointOfInterest.y - draggedPos.y) < 0.0001
-                        ) {
-                            pointOfInterest = previousHoveredPoint;
-                        }
-
                         document.body.style.cursor = "grabbing";
                         return;
                     }
 
-                    // Check if clicking on a zone edge
-                    const clickedZone = findZoneAtPoint(mouseX, mouseY);
-                    if (clickedZone) {
-                        selectedZone = clickedZone;
-                        // Clear POI if it's part of the newly selected zone
-                        if (
-                            pointOfInterest &&
-                            isPointPartOfZone(pointOfInterest, clickedZone)
-                        ) {
-                            pointOfInterest = null;
-                            previousHoveredPoint = null;
+                    // Check if clicking on an object to start dragging it
+                    const clickedObject = findObjectAtPoint(mouseX, mouseY);
+                    if (clickedObject) {
+                        // Start drag operation
+                        moveTarget = clickedObject;
+                        isDraggingObject = true;
+
+                        // Calculate offset from click position to object anchor
+                        const worldPos = screenToWorld(mouseX, mouseY);
+                        const clickWorldPos = {
+                            x: worldPos.x + centerX,
+                            y: worldPos.y + centerY,
+                        };
+                        const anchor = getObjectAnchorPosition(moveTarget);
+                        if (anchor) {
+                            moveOffset = {
+                                x: anchor.x - clickWorldPos.x,
+                                y: anchor.y - clickWorldPos.y,
+                            };
+                        } else {
+                            moveOffset = { x: 0, y: 0 };
                         }
-                    } else {
-                        // Clicked on empty space - deselect
-                        selectedZone = null;
+
+                        document.body.style.cursor = "grabbing";
+
+                        // Also select the object
+                        if (clickedObject.type === "zone") {
+                            selectedZone = {
+                                type: clickedObject.zoneType,
+                                index: clickedObject.index,
+                            };
+                        } else if (clickedObject.type === "wall") {
+                            selectedZone = {
+                                type: "wall",
+                                index: clickedObject.index,
+                            };
+                        } else if (clickedObject.type === "accessPoint") {
+                            selectedZone = {
+                                type: "accessPoint",
+                                index: clickedObject.index,
+                            };
+                        } else if (clickedObject.type === "mapNote") {
+                            selectedZone = {
+                                type: "mapNote",
+                                index: clickedObject.index,
+                            };
+                        }
+                        return;
                     }
+
+                    // Clicked on empty space - deselect
+                    selectedZone = null;
                 }
             }
 
@@ -2108,7 +2332,12 @@
                     snapTargetPoint = null;
                     activeSnaps = [];
                 }
-                if (!spacebarDown) {
+                // Complete drag operation if we were dragging an object
+                if (isDraggingObject && moveTarget) {
+                    completeMove(mouseX, mouseY);
+                    isDraggingObject = false;
+                }
+                if (!spacebarDown && !isMovingObject) {
                     document.body.style.cursor = "default";
                 }
             }
@@ -2120,8 +2349,8 @@
                     panY = spacebarStartPanY + (mouseY - spacebarStartMouseY);
                     hoveredZone = null;
                     hoveredPoint = null;
-                } else if (!isPanning && !isZooming) {
-                    // Always check for nearby points to update POI
+                } else if (!isPanning && !isZooming && !isDraggingPoint) {
+                    // Check for nearby points for hover indicator
                     const worldPos = screenToWorld(mouseX, mouseY);
                     const nearestPoint = findNearestPoint(
                         worldPos.x + centerX,
@@ -2137,71 +2366,28 @@
                         };
                     }
 
-                    // Update POI when moving to a different point
-                    // POI rules: can't be part of selected zone, can't be the point being dragged
+                    // Update hover visuals
                     if (currentPointUnderMouse) {
-                        const isDifferentPoint =
-                            !pointOfInterest ||
-                            Math.abs(
-                                pointOfInterest.x - currentPointUnderMouse.x,
-                            ) > 0.0001 ||
-                            Math.abs(
-                                pointOfInterest.y - currentPointUnderMouse.y,
-                            ) > 0.0001;
-
-                        const isPartOfSelectedZone =
-                            selectedZone &&
-                            isPointPartOfZone(
-                                currentPointUnderMouse,
-                                selectedZone,
-                            );
-
-                        const isCurrentDraggedPoint =
-                            isDraggingPoint &&
-                            draggedPoint &&
-                            isPointBeingDragged(
-                                currentPointUnderMouse,
-                                draggedPoint,
-                            );
-
-                        if (
-                            isDifferentPoint &&
-                            !isPartOfSelectedZone &&
-                            !isCurrentDraggedPoint
-                        ) {
-                            // Set current POI as previous, then update POI
-                            previousHoveredPoint = pointOfInterest;
-                            pointOfInterest = {
-                                x: currentPointUnderMouse.x,
-                                y: currentPointUnderMouse.y,
-                            };
-                        }
-                    }
-
-                    // Only update hover visuals when not dragging
-                    if (!isDraggingPoint) {
-                        if (currentPointUnderMouse) {
-                            hoveredPoint = currentPointUnderMouse;
-                            hoveredZone = null;
+                        hoveredPoint = currentPointUnderMouse;
+                        hoveredZone = null;
+                        document.body.style.cursor = "grab";
+                    } else {
+                        hoveredPoint = null;
+                        // Update cursor and hover state based on what's under the mouse
+                        const pointHandle = findPointHandleAtPoint(
+                            mouseX,
+                            mouseY,
+                        );
+                        if (pointHandle) {
                             document.body.style.cursor = "grab";
+                            hoveredZone = null;
                         } else {
-                            hoveredPoint = null;
-                            // Update cursor and hover state based on what's under the mouse
-                            const pointHandle = findPointHandleAtPoint(
-                                mouseX,
-                                mouseY,
-                            );
-                            if (pointHandle) {
-                                document.body.style.cursor = "grab";
-                                hoveredZone = null;
+                            const zone = findZoneAtPoint(mouseX, mouseY);
+                            hoveredZone = zone;
+                            if (zone) {
+                                document.body.style.cursor = "pointer";
                             } else {
-                                const zone = findZoneAtPoint(mouseX, mouseY);
-                                hoveredZone = zone;
-                                if (zone) {
-                                    document.body.style.cursor = "pointer";
-                                } else {
-                                    document.body.style.cursor = "default";
-                                }
+                                document.body.style.cursor = "default";
                             }
                         }
                     }
@@ -2220,7 +2406,6 @@
                     // Reset snap state
                     snapTargetPoint = null;
                     activeSnaps = [];
-                    axisSnap = null;
 
                     // Check for snap to existing point (highest priority)
                     const snapTolerance = SNAP_TOLERANCE / zoomLevel;
@@ -2254,56 +2439,6 @@
                             activeSnaps = bestSnap.activeSnaps;
                         } else {
                             activeSnaps = [];
-                        }
-
-                        // Check for X/Y axis snap to Point of Interest
-                        // This works alongside other snaps
-                        if (pointOfInterest) {
-                            const axisTolerance =
-                                AXIS_SNAP_TOLERANCE / zoomLevel;
-                            const xDiff = Math.abs(newX - pointOfInterest.x);
-                            const yDiff = Math.abs(newY - pointOfInterest.y);
-
-                            // Don't snap to POI if it's the point we're dragging
-                            const isPOIDragged =
-                                Math.abs(
-                                    pointOfInterest.x - (worldPos.x + centerX),
-                                ) < 0.0001 &&
-                                Math.abs(
-                                    pointOfInterest.y - (worldPos.y + centerY),
-                                ) < 0.0001;
-
-                            if (!isPOIDragged) {
-                                if (
-                                    xDiff < axisTolerance &&
-                                    yDiff < axisTolerance
-                                ) {
-                                    // Snap to both X and Y (coincident)
-                                    newX = pointOfInterest.x;
-                                    newY = pointOfInterest.y;
-                                    axisSnap = {
-                                        axis: "both",
-                                        poiX: pointOfInterest.x,
-                                        poiY: pointOfInterest.y,
-                                    };
-                                } else if (xDiff < axisTolerance) {
-                                    // Snap to X axis (vertical alignment)
-                                    newX = pointOfInterest.x;
-                                    axisSnap = {
-                                        axis: "x",
-                                        poiX: pointOfInterest.x,
-                                        poiY: pointOfInterest.y,
-                                    };
-                                } else if (yDiff < axisTolerance) {
-                                    // Snap to Y axis (horizontal alignment)
-                                    newY = pointOfInterest.y;
-                                    axisSnap = {
-                                        axis: "y",
-                                        poiX: pointOfInterest.x,
-                                        poiY: pointOfInterest.y,
-                                    };
-                                }
-                            }
                         }
                     }
 
@@ -2395,6 +2530,688 @@
                 // Prevent default scroll behavior
                 return false;
             }
+
+            // ========================================
+            // CONTEXT MENU FUNCTIONS
+            // ========================================
+
+            // Find access point at screen position
+            function findAccessPointAtPoint(screenX, screenY) {
+                if (!objects || !objects.accessPoints) return null;
+
+                for (let i = 0; i < objects.accessPoints.length; i++) {
+                    const ap = objects.accessPoints[i];
+                    const worldX = ap.x - centerX;
+                    const worldY = ap.y - centerY;
+                    const screenPos = worldToScreen(worldX, worldY);
+
+                    // Calculate icon bounds in screen space
+                    const iconScale = apIconScale / zoomLevel;
+                    const drawWidth = apIconBase.width * iconScale * zoomLevel;
+                    const drawHeight =
+                        apIconBase.height * iconScale * zoomLevel;
+                    const drawX =
+                        screenPos.x - apIconHotspot.x * iconScale * zoomLevel;
+                    const drawY =
+                        screenPos.y - apIconHotspot.y * iconScale * zoomLevel;
+
+                    // Check if click is within image bounds
+                    if (
+                        screenX >= drawX &&
+                        screenX <= drawX + drawWidth &&
+                        screenY >= drawY &&
+                        screenY <= drawY + drawHeight
+                    ) {
+                        return { type: "accessPoint", index: i };
+                    }
+                }
+                return null;
+            }
+
+            // Find map note at screen position
+            function findMapNoteAtPoint(screenX, screenY) {
+                if (!objects || !objects.mapNotes) return null;
+
+                for (let i = 0; i < objects.mapNotes.length; i++) {
+                    const note = objects.mapNotes[i];
+                    const worldX = note.x - centerX;
+                    const worldY = note.y - centerY;
+                    const screenPos = worldToScreen(worldX, worldY);
+
+                    // Calculate icon bounds in screen space
+                    const iconScale = mapNoteIconScale / zoomLevel;
+                    const drawWidth =
+                        mapNoteIconBase.width * iconScale * zoomLevel;
+                    const drawHeight =
+                        mapNoteIconBase.height * iconScale * zoomLevel;
+                    const drawX =
+                        screenPos.x -
+                        mapNoteIconHotspot.x * iconScale * zoomLevel;
+                    const drawY =
+                        screenPos.y -
+                        mapNoteIconHotspot.y * iconScale * zoomLevel;
+
+                    // Check if click is within image bounds
+                    if (
+                        screenX >= drawX &&
+                        screenX <= drawX + drawWidth &&
+                        screenY >= drawY &&
+                        screenY <= drawY + drawHeight
+                    ) {
+                        return { type: "mapNote", index: i };
+                    }
+                }
+                return null;
+            }
+
+            // Find any object at screen position (for context menu)
+            function findObjectAtPoint(screenX, screenY) {
+                // Check APs first (top layer)
+                const ap = findAccessPointAtPoint(screenX, screenY);
+                if (ap) return ap;
+
+                // Check map notes
+                const note = findMapNoteAtPoint(screenX, screenY);
+                if (note) return note;
+
+                // Check zones and walls
+                const zone = findZoneAtPoint(screenX, screenY);
+                if (zone) {
+                    // Walls are returned as { type: 'wall', index } - keep as is
+                    if (zone.type === "wall") {
+                        return { type: "wall", index: zone.index };
+                    }
+                    // Convert zone format to context menu format
+                    return {
+                        type: "zone",
+                        zoneType: zone.type,
+                        index: zone.index,
+                    };
+                }
+
+                return null;
+            }
+
+            // Show context menu at position
+            function showContextMenu(screenX, screenY, target) {
+                const menu = document.getElementById("contextMenu");
+                contextMenuTarget = target;
+
+                // Store the click position in world coordinates for move offset calculation
+                const worldPos = screenToWorld(screenX, screenY);
+                contextMenuClickPos = {
+                    x: worldPos.x + centerX,
+                    y: worldPos.y + centerY,
+                };
+
+                // Build menu items based on target type
+                let menuHTML = "";
+
+                if (target.type === "wall" || target.zoneType === "wall") {
+                    // Wall segment menu
+                    menuHTML = `
+                        <div class="context-menu-item danger" onclick="contextMenuDelete()">
+                            <i class="bx bx-trash"></i> Delete
+                        </div>
+                    `;
+                } else if (target.type === "zone") {
+                    // Zone/Object menu
+                    menuHTML = `
+                        <div class="context-menu-item danger" onclick="contextMenuDelete()">
+                            <i class="bx bx-trash"></i> Delete
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuMove()">
+                            <i class="bx bx-move"></i> Move
+                        </div>
+                        <div class="context-menu-divider"></div>
+                        <div class="context-menu-item" onclick="contextMenuDuplicate('attenuatingZone')">
+                            <i class="bx bx-duplicate"></i> Duplicate as Attenuating Object
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuDuplicate('scopeZone')">
+                            <i class="bx bx-duplicate"></i> Duplicate as Scope Zone
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuDuplicate('floorHole')">
+                            <i class="bx bx-duplicate"></i> Duplicate as Floor Hole
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuDuplicate('buildingEdge')">
+                            <i class="bx bx-duplicate"></i> Duplicate as Building Edge
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuDuplicate('capacityZone')">
+                            <i class="bx bx-duplicate"></i> Duplicate as Capacity Zone
+                        </div>
+                    `;
+                } else if (target.type === "accessPoint") {
+                    // AP menu
+                    menuHTML = `
+                        <div class="context-menu-item danger" onclick="contextMenuDelete()">
+                            <i class="bx bx-trash"></i> Delete
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuMove()">
+                            <i class="bx bx-move"></i> Move
+                        </div>
+                        <div class="context-menu-divider"></div>
+                        <div class="context-menu-item" onclick="contextMenuChangeColor()">
+                            <i class="bx bx-palette"></i> Change Color
+                        </div>
+                    `;
+                } else if (target.type === "mapNote") {
+                    // Map note menu
+                    menuHTML = `
+                        <div class="context-menu-item danger" onclick="contextMenuDelete()">
+                            <i class="bx bx-trash"></i> Delete
+                        </div>
+                        <div class="context-menu-item" onclick="contextMenuMove()">
+                            <i class="bx bx-move"></i> Move
+                        </div>
+                        <div class="context-menu-divider"></div>
+                        <div class="context-menu-item" onclick="contextMenuChangeColor()">
+                            <i class="bx bx-palette"></i> Change Color
+                        </div>
+                    `;
+                }
+
+                menu.innerHTML = menuHTML;
+
+                // Position menu below and to the right of click, ensuring it stays on screen
+                let menuX = screenX;
+                let menuY = screenY + 10;
+
+                // Show temporarily to get dimensions
+                menu.style.left = "0px";
+                menu.style.top = "0px";
+                menu.classList.add("visible");
+
+                const menuRect = menu.getBoundingClientRect();
+
+                // Adjust if menu would go off right edge
+                if (menuX + menuRect.width > window.innerWidth - 10) {
+                    menuX = window.innerWidth - menuRect.width - 10;
+                }
+
+                // Adjust if menu would go off bottom edge
+                if (menuY + menuRect.height > window.innerHeight - 10) {
+                    menuY = screenY - menuRect.height - 10;
+                }
+
+                menu.style.left = menuX + "px";
+                menu.style.top = menuY + "px";
+            }
+
+            // Hide context menu
+            function hideContextMenu() {
+                const menu = document.getElementById("contextMenu");
+                menu.classList.remove("visible");
+                contextMenuTarget = null;
+            }
+
+            // Delete the target object
+            function contextMenuDelete() {
+                if (!contextMenuTarget || !objects) {
+                    hideContextMenu();
+                    return;
+                }
+
+                const target = contextMenuTarget;
+                hideContextMenu();
+
+                if (target.type === "wall" || target.zoneType === "wall") {
+                    // Delete wall
+                    const wallIndex = target.index;
+                    if (
+                        objects.walls &&
+                        wallIndex >= 0 &&
+                        wallIndex < objects.walls.length
+                    ) {
+                        const wall = objects.walls[wallIndex];
+
+                        // Remove the wall
+                        objects.walls.splice(wallIndex, 1);
+
+                        // Check if endpoints are orphaned (not used by any other wall)
+                        const startId = wall.startId;
+                        const endId = wall.endId;
+
+                        const startUsed = objects.walls.some(
+                            (w) => w.startId === startId || w.endId === startId,
+                        );
+                        const endUsed = objects.walls.some(
+                            (w) => w.startId === endId || w.endId === endId,
+                        );
+
+                        if (!startUsed) {
+                            const idx = objects.wallEndpoints.findIndex(
+                                (e) => e.id === startId,
+                            );
+                            if (idx >= 0) objects.wallEndpoints.splice(idx, 1);
+                        }
+                        if (!endUsed) {
+                            const idx = objects.wallEndpoints.findIndex(
+                                (e) => e.id === endId,
+                            );
+                            if (idx >= 0) objects.wallEndpoints.splice(idx, 1);
+                        }
+
+                        // Clear selection if this wall was selected
+                        if (
+                            selectedZone &&
+                            selectedZone.type === "wall" &&
+                            selectedZone.index === wallIndex
+                        ) {
+                            selectedZone = null;
+                        } else if (
+                            selectedZone &&
+                            selectedZone.type === "wall" &&
+                            selectedZone.index > wallIndex
+                        ) {
+                            selectedZone.index--;
+                        }
+
+                        markChangesPending();
+                        showToast("Wall deleted.", "success");
+                    }
+                } else if (target.type === "zone") {
+                    // Delete zone
+                    const zoneType = target.zoneType;
+                    const zoneIndex = target.index;
+                    let deleted = false;
+
+                    switch (zoneType) {
+                        case "attenuatingZone":
+                            if (
+                                objects.attenuatingZones &&
+                                zoneIndex >= 0 &&
+                                zoneIndex < objects.attenuatingZones.length
+                            ) {
+                                objects.attenuatingZones.splice(zoneIndex, 1);
+                                deleted = true;
+                            }
+                            break;
+                        case "scopeZone":
+                            if (
+                                objects.scopeZones &&
+                                zoneIndex >= 0 &&
+                                zoneIndex < objects.scopeZones.length
+                            ) {
+                                objects.scopeZones.splice(zoneIndex, 1);
+                                deleted = true;
+                            }
+                            break;
+                        case "holeInFloorZone":
+                            if (
+                                objects.holeInFloorZones &&
+                                zoneIndex >= 0 &&
+                                zoneIndex < objects.holeInFloorZones.length
+                            ) {
+                                objects.holeInFloorZones.splice(zoneIndex, 1);
+                                deleted = true;
+                            }
+                            break;
+                        case "capacityZone":
+                            if (
+                                objects.capacityZones &&
+                                zoneIndex >= 0 &&
+                                zoneIndex < objects.capacityZones.length
+                            ) {
+                                objects.capacityZones.splice(zoneIndex, 1);
+                                deleted = true;
+                            }
+                            break;
+                    }
+
+                    if (deleted) {
+                        // Clear selection if this zone was selected
+                        if (
+                            selectedZone &&
+                            selectedZone.type === zoneType &&
+                            selectedZone.index === zoneIndex
+                        ) {
+                            selectedZone = null;
+                        } else if (
+                            selectedZone &&
+                            selectedZone.type === zoneType &&
+                            selectedZone.index > zoneIndex
+                        ) {
+                            selectedZone.index--;
+                        }
+
+                        markChangesPending();
+                        showToast("Zone or object deleted.", "success");
+                    }
+                } else if (target.type === "accessPoint") {
+                    // Delete access point
+                    if (
+                        objects.accessPoints &&
+                        target.index >= 0 &&
+                        target.index < objects.accessPoints.length
+                    ) {
+                        objects.accessPoints.splice(target.index, 1);
+                        markChangesPending();
+                        showToast("Access point deleted.", "success");
+                    }
+                } else if (target.type === "mapNote") {
+                    // Delete map note
+                    if (
+                        objects.mapNotes &&
+                        target.index >= 0 &&
+                        target.index < objects.mapNotes.length
+                    ) {
+                        objects.mapNotes.splice(target.index, 1);
+                        markChangesPending();
+                        showToast("Map note deleted.", "success");
+                    }
+                }
+            }
+
+            // Start move mode for the target object
+            // Get the anchor position of an object (centroid for zones, position for APs/notes)
+            function getObjectAnchorPosition(target) {
+                if (!target || !objects) return null;
+
+                if (target.type === "zone") {
+                    const coords = getZoneCoords(target.zoneType, target.index);
+                    if (coords && coords.length > 0) {
+                        let sumX = 0,
+                            sumY = 0;
+                        for (const coord of coords) {
+                            sumX += coord[0];
+                            sumY += coord[1];
+                        }
+                        return {
+                            x: sumX / coords.length,
+                            y: sumY / coords.length,
+                        };
+                    }
+                } else if (target.type === "accessPoint") {
+                    const ap = objects.accessPoints?.[target.index];
+                    if (ap) return { x: ap.x, y: ap.y };
+                } else if (target.type === "mapNote") {
+                    const note = objects.mapNotes?.[target.index];
+                    if (note) return { x: note.x, y: note.y };
+                }
+                return null;
+            }
+
+            function contextMenuMove() {
+                if (!contextMenuTarget) {
+                    hideContextMenu();
+                    return;
+                }
+
+                moveTarget = { ...contextMenuTarget };
+
+                // Calculate offset from click position to object anchor
+                const anchor = getObjectAnchorPosition(moveTarget);
+                if (anchor) {
+                    moveOffset = {
+                        x: anchor.x - contextMenuClickPos.x,
+                        y: anchor.y - contextMenuClickPos.y,
+                    };
+                } else {
+                    moveOffset = { x: 0, y: 0 };
+                }
+
+                isMovingObject = true;
+                hideContextMenu();
+                document.body.style.cursor = "move";
+                showToast("Click on the canvas to place the object.", "info");
+            }
+
+            // Complete the move operation
+            function completeMove(screenX, screenY) {
+                if (!moveTarget || !objects) {
+                    cancelMove();
+                    return;
+                }
+
+                const worldPos = screenToWorld(screenX, screenY);
+                // Apply the offset so object moves from where it was grabbed
+                const newAnchorX = worldPos.x + centerX + moveOffset.x;
+                const newAnchorY = worldPos.y + centerY + moveOffset.y;
+
+                if (moveTarget.type === "zone") {
+                    // Move zone - calculate offset from centroid and apply to all points
+                    const coords = getZoneCoords(
+                        moveTarget.zoneType,
+                        moveTarget.index,
+                    );
+                    if (coords && coords.length > 0) {
+                        // Calculate current centroid
+                        let sumX = 0,
+                            sumY = 0;
+                        for (const coord of coords) {
+                            sumX += coord[0];
+                            sumY += coord[1];
+                        }
+                        const centroidX = sumX / coords.length;
+                        const centroidY = sumY / coords.length;
+
+                        // Calculate offset to move centroid to new anchor position
+                        const offsetX = newAnchorX - centroidX;
+                        const offsetY = newAnchorY - centroidY;
+
+                        // Apply offset to all points
+                        for (const coord of coords) {
+                            coord[0] += offsetX;
+                            coord[1] += offsetY;
+                        }
+
+                        markChangesPending();
+                    }
+                } else if (moveTarget.type === "accessPoint") {
+                    // Move access point
+                    if (
+                        objects.accessPoints &&
+                        moveTarget.index >= 0 &&
+                        moveTarget.index < objects.accessPoints.length
+                    ) {
+                        objects.accessPoints[moveTarget.index].x = newAnchorX;
+                        objects.accessPoints[moveTarget.index].y = newAnchorY;
+                        markChangesPending();
+                    }
+                } else if (moveTarget.type === "mapNote") {
+                    // Move map note
+                    if (
+                        objects.mapNotes &&
+                        moveTarget.index >= 0 &&
+                        moveTarget.index < objects.mapNotes.length
+                    ) {
+                        objects.mapNotes[moveTarget.index].x = newAnchorX;
+                        objects.mapNotes[moveTarget.index].y = newAnchorY;
+                        markChangesPending();
+                    }
+                }
+
+                cancelMove();
+            }
+
+            // Cancel move operation
+            function cancelMove() {
+                isMovingObject = false;
+                isDraggingObject = false;
+                moveTarget = null;
+                moveOffset = { x: 0, y: 0 };
+                document.body.style.cursor = "default";
+            }
+
+            // Duplicate zone as a different type
+            function contextMenuDuplicate(targetType) {
+                if (
+                    !contextMenuTarget ||
+                    contextMenuTarget.type !== "zone" ||
+                    !objects
+                ) {
+                    hideContextMenu();
+                    return;
+                }
+
+                const sourceType = contextMenuTarget.zoneType;
+                const sourceIndex = contextMenuTarget.index;
+                hideContextMenu();
+
+                // Get source zone coordinates
+                const sourceCoords = getZoneCoords(sourceType, sourceIndex);
+                if (!sourceCoords) {
+                    showToast(
+                        "Oops, couldn't find the source zone for some reason. You'll probably never see this error message, though.",
+                        "error",
+                    );
+                    return;
+                }
+
+                // Deep copy the coordinates
+                const newCoords = sourceCoords.map((coord) => [
+                    coord[0],
+                    coord[1],
+                ]);
+                const newArea = {
+                    type: "Polygon",
+                    coordinates: [newCoords],
+                };
+
+                // Create the new zone based on target type
+                switch (targetType) {
+                    case "attenuatingZone":
+                        // Ensure we have an attenuating zone type
+                        if (
+                            !objects.attenuatingZoneTypes ||
+                            objects.attenuatingZoneTypes.length === 0
+                        ) {
+                            objects.attenuatingZoneTypes = [
+                                {
+                                    id: crypto.randomUUID(),
+                                    name: "Converted Zone",
+                                    color: "#7AC2AF",
+                                    shortcutKey: "",
+                                    topEdge: 2,
+                                    bottomEdge: null,
+                                    attenuationDbPerMeter: 5,
+                                    ituRModelEnabled: true,
+                                    transparencyEnabled: false,
+                                },
+                            ];
+                        }
+                        if (!objects.attenuatingZones)
+                            objects.attenuatingZones = [];
+                        objects.attenuatingZones.push({
+                            typeId: objects.attenuatingZoneTypes[0].id,
+                            area: newArea,
+                        });
+                        break;
+
+                    case "scopeZone":
+                        if (!objects.scopeZones) objects.scopeZones = [];
+                        objects.scopeZones.push({
+                            type: "INCLUDE",
+                            area: newArea,
+                        });
+                        break;
+
+                    case "floorHole":
+                        if (!objects.holeInFloorZones)
+                            objects.holeInFloorZones = [];
+                        objects.holeInFloorZones.push({
+                            type: "INCLUDE",
+                            area: newArea,
+                        });
+                        break;
+
+                    case "buildingEdge":
+                        if (!objects.holeInFloorZones)
+                            objects.holeInFloorZones = [];
+                        objects.holeInFloorZones.push({
+                            type: "EXCLUDE",
+                            area: newArea,
+                        });
+                        break;
+
+                    case "capacityZone":
+                        if (!objects.capacityZones) objects.capacityZones = [];
+                        objects.capacityZones.push({
+                            name: "Capacity Zone",
+                            deviceAmounts: [
+                                { wifiDevice: "IPHONE", amount: 50 },
+                                { wifiDevice: "MACBOOK", amount: 50 },
+                            ],
+                            area: newArea,
+                        });
+                        break;
+                }
+
+                markChangesPending();
+                showToast("Zone or object duplicated.", "success");
+            }
+
+            // Change color of AP or map note
+            function contextMenuChangeColor() {
+                if (!contextMenuTarget || !objects) {
+                    hideContextMenu();
+                    return;
+                }
+
+                const target = { ...contextMenuTarget };
+                hideContextMenu();
+
+                const colorPicker = document.getElementById("colorPicker");
+
+                // Get current color
+                let currentColor = "#4687f0";
+                if (
+                    target.type === "accessPoint" &&
+                    objects.accessPoints &&
+                    objects.accessPoints[target.index]
+                ) {
+                    currentColor =
+                        objects.accessPoints[target.index].color || "#4687f0";
+                } else if (
+                    target.type === "mapNote" &&
+                    objects.mapNotes &&
+                    objects.mapNotes[target.index]
+                ) {
+                    currentColor =
+                        objects.mapNotes[target.index].color || "#db6921";
+                }
+
+                colorPicker.value = currentColor;
+
+                // Set up one-time change handler
+                const handleChange = (e) => {
+                    const newColor = e.target.value;
+
+                    if (
+                        target.type === "accessPoint" &&
+                        objects.accessPoints &&
+                        objects.accessPoints[target.index]
+                    ) {
+                        objects.accessPoints[target.index].color = newColor;
+                        markChangesPending();
+                        showToast("Access Point color changed.", "success");
+                    } else if (
+                        target.type === "mapNote" &&
+                        objects.mapNotes &&
+                        objects.mapNotes[target.index]
+                    ) {
+                        objects.mapNotes[target.index].color = newColor;
+                        markChangesPending();
+                        showToast("Map Note Color changed.", "success");
+                    }
+
+                    colorPicker.removeEventListener("change", handleChange);
+                };
+
+                colorPicker.addEventListener("change", handleChange);
+                colorPicker.click();
+            }
+
+            // Handle clicks outside context menu to close it
+            document.addEventListener("click", function (e) {
+                const menu = document.getElementById("contextMenu");
+                if (menu && menu.classList.contains("visible")) {
+                    // Check if click was inside menu
+                    if (!menu.contains(e.target)) {
+                        hideContextMenu();
+                    }
+                }
+            });
 
             function zoomIn() {
                 // Zoom in centered on the canvas
@@ -3564,6 +4381,139 @@
                 pop();
             }
 
+            // Draw preview of object being moved
+            function drawMovePreview() {
+                if (
+                    (!isMovingObject && !isDraggingObject) ||
+                    !moveTarget ||
+                    !objects
+                )
+                    return;
+
+                // Get the current mouse position in world coordinates
+                const worldPos = screenToWorld(mouseX, mouseY);
+                // Apply offset so preview shows object at correct position relative to grab point
+                const targetX = worldPos.x + centerX + moveOffset.x;
+                const targetY = worldPos.y + centerY + moveOffset.y;
+
+                if (moveTarget.type === "zone") {
+                    // Get the zone coordinates and calculate offset
+                    const coords = getZoneCoords(
+                        moveTarget.zoneType,
+                        moveTarget.index,
+                    );
+                    if (coords && coords.length > 0) {
+                        // Calculate current centroid
+                        let sumX = 0,
+                            sumY = 0;
+                        for (const coord of coords) {
+                            sumX += coord[0];
+                            sumY += coord[1];
+                        }
+                        const centroidX = sumX / coords.length;
+                        const centroidY = sumY / coords.length;
+
+                        // Calculate offset to move centroid to target position
+                        const offsetX = targetX - centroidX;
+                        const offsetY = targetY - centroidY;
+
+                        // Create preview coordinates
+                        const previewCoords = coords.map((coord) => [
+                            coord[0] + offsetX - centerX,
+                            coord[1] + offsetY - centerY,
+                        ]);
+
+                        // Determine zone color and style
+                        let zoneColor = "#7AC2AF";
+                        let style = zoneStyles.attenuatingZone;
+
+                        switch (moveTarget.zoneType) {
+                            case "attenuatingZone":
+                                const zone =
+                                    objects.attenuatingZones?.[
+                                        moveTarget.index
+                                    ];
+                                const type = objects.attenuatingZoneTypes?.find(
+                                    (t) => t.id === zone?.typeId,
+                                );
+                                zoneColor =
+                                    type && type.color ? type.color : "#7AC2AF";
+                                style = zoneStyles.attenuatingZone;
+                                break;
+                            case "scopeZone":
+                                zoneColor = zoneStyles.scopeZone.color;
+                                style = zoneStyles.scopeZone;
+                                break;
+                            case "holeInFloorZone":
+                                const holeZone =
+                                    objects.holeInFloorZones?.[
+                                        moveTarget.index
+                                    ];
+                                if (holeZone?.type === "INCLUDE") {
+                                    zoneColor = zoneStyles.floorHole.color;
+                                    style = zoneStyles.floorHole;
+                                } else {
+                                    zoneColor = zoneStyles.buildingEdge.color;
+                                    style = zoneStyles.buildingEdge;
+                                }
+                                break;
+                            case "capacityZone":
+                                zoneColor = zoneStyles.capacityZone.color;
+                                style = zoneStyles.capacityZone;
+                                break;
+                        }
+
+                        // Draw the preview zone
+                        // Draw filled shape (only if fillOpacity is defined)
+                        if (style.fillOpacity !== undefined) {
+                            let c = color(zoneColor);
+                            c.setAlpha(style.fillOpacity);
+                            fill(c);
+                            noStroke();
+                            beginShape();
+                            for (let coord of previewCoords) {
+                                vertex(coord[0], coord[1]);
+                            }
+                            endShape(CLOSE);
+                        }
+
+                        // Draw dashed outline
+                        let strokeColor = zoneColor;
+                        if (style.strokeDarken) {
+                            strokeColor = darkenColor(
+                                zoneColor,
+                                style.strokeDarken,
+                            );
+                        }
+                        drawSolidOutline(previewCoords, strokeColor, style);
+                    }
+                } else if (moveTarget.type === "accessPoint") {
+                    // Draw AP preview at target position (with offset applied)
+                    const ap = objects.accessPoints?.[moveTarget.index];
+                    if (ap) {
+                        const apColor = ap.color || "#4687f0";
+                        drawAccessPoint(
+                            targetX - centerX,
+                            targetY - centerY,
+                            apColor,
+                            true, // Show as selected while dragging
+                        );
+                    }
+                } else if (moveTarget.type === "mapNote") {
+                    // Draw map note preview at target position (with offset applied)
+                    const note = objects.mapNotes?.[moveTarget.index];
+                    if (note) {
+                        const noteColor = note.color || "#db6921";
+                        drawMapNote(
+                            targetX - centerX,
+                            targetY - centerY,
+                            noteColor,
+                            true, // Show as selected while dragging
+                        );
+                    }
+                }
+            }
+
             // Draw hovered point indicator or snap target
             function drawHoveredPoint() {
                 // Show snap target when dragging to a point, otherwise show hovered point
@@ -3574,31 +4524,6 @@
                 // Draw all active angle/line snap indicators
                 if (isDraggingPoint && activeSnaps.length > 0) {
                     drawAllSnapIndicators();
-                }
-
-                // Draw axis snap indicator (red dashed line to POI)
-                if (isDraggingPoint && axisSnap) {
-                    drawAxisSnapIndicator();
-                }
-
-                // Draw Point of Interest indicator (grey outlined circle)
-                if (pointOfInterest) {
-                    const poiWorldX = pointOfInterest.x - centerX;
-                    const poiWorldY = pointOfInterest.y - centerY;
-                    const poiScreenPos = worldToScreen(poiWorldX, poiWorldY);
-
-                    push();
-                    resetMatrix();
-                    fill(255);
-                    stroke("#9A999C");
-                    strokeWeight(2);
-                    ellipse(
-                        poiScreenPos.x,
-                        poiScreenPos.y,
-                        POINT_HANDLE_RADIUS * 2,
-                        POINT_HANDLE_RADIUS * 2,
-                    );
-                    pop();
                 }
 
                 if (!pointToDraw) return;
@@ -3639,72 +4564,6 @@
                     drawingContext.setLineDash([]); // Reset to solid
                 }
 
-                pop();
-            }
-
-            // Draw axis snap indicator line from current point to Point of Interest
-            function drawAxisSnapIndicator() {
-                if (!axisSnap || !draggedPoint) return;
-
-                // Get current dragged point position
-                let currentX, currentY;
-                if (
-                    draggedPoint.zoneType === "wall" &&
-                    draggedPoint.endpointId
-                ) {
-                    const endpoint = objects.wallEndpoints?.find(
-                        (e) => e.id === draggedPoint.endpointId,
-                    );
-                    if (!endpoint) return;
-                    currentX = endpoint.x;
-                    currentY = endpoint.y;
-                } else {
-                    const coords = getZoneCoords(
-                        draggedPoint.zoneType,
-                        draggedPoint.zoneIndex,
-                    );
-                    if (!coords || draggedPoint.pointIndex >= coords.length)
-                        return;
-                    currentX = coords[draggedPoint.pointIndex][0];
-                    currentY = coords[draggedPoint.pointIndex][1];
-                }
-
-                const currentScreen = worldToScreen(
-                    currentX - centerX,
-                    currentY - centerY,
-                );
-                const poiScreen = worldToScreen(
-                    axisSnap.poiX - centerX,
-                    axisSnap.poiY - centerY,
-                );
-
-                push();
-                resetMatrix();
-
-                stroke("#FF0000");
-                strokeWeight(2);
-                drawingContext.setLineDash([4, 3]); // Dashed line pattern
-
-                if (axisSnap.axis === "x" || axisSnap.axis === "both") {
-                    // Draw vertical line (X axis alignment)
-                    line(
-                        currentScreen.x,
-                        currentScreen.y,
-                        currentScreen.x,
-                        poiScreen.y,
-                    );
-                }
-                if (axisSnap.axis === "y" || axisSnap.axis === "both") {
-                    // Draw horizontal line (Y axis alignment)
-                    line(
-                        currentScreen.x,
-                        currentScreen.y,
-                        poiScreen.x,
-                        currentScreen.y,
-                    );
-                }
-
-                drawingContext.setLineDash([]); // Reset to solid
                 pop();
             }
 
@@ -3813,6 +4672,16 @@
                 }
                 if (keyCode === SHIFT) {
                     shiftDown = true;
+                }
+                if (keyCode === ESCAPE) {
+                    // Cancel move mode
+                    if (isMovingObject) {
+                        cancelMove();
+                    }
+                    // Hide context menu
+                    hideContextMenu();
+                    // Deselect
+                    selectedZone = null;
                 }
             }
 
